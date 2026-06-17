@@ -1,6 +1,6 @@
 # Backend Capabilities
 
-Agent Cockpit supports Claude Code, OpenAI Codex, Kiro, OpenCode, and Grok Build. The exact
+Agent Cockpit supports Claude Code, OpenAI Codex, Kiro, OpenCode, Grok Build, and GitHub Copilot. The exact
 feature surface differs because each CLI harness exposes different protocols and
 metadata.
 
@@ -82,3 +82,29 @@ page summarizes the user-facing shape.
 
 Native compatibility is verified on Grok Build 1.0.52, macOS arm64. See the
 [Grok implementation specification](../spec-grok-build.md) for platform limits.
+
+## GitHub Copilot
+
+- direct `copilot -p <prompt> --output-format json` CLI spawn per message;
+- self-configured authentication that reuses the `copilot` CLI login under
+  `~/.copilot` (sign in with `copilot` then `/login`); Agent Cockpit checks
+  availability with `copilot --version` but does not manage the login;
+- curated model catalog (Claude and GPT model identifiers) selectable per
+  conversation, since the CLI exposes no machine-readable model listing;
+- reasoning effort through `copilot --reasoning-effort <low|medium|high|xhigh>`;
+- visible thinking mapped from `assistant.reasoning_delta` JSONL events;
+- streaming assistant text mapped from `assistant.message_delta` events;
+- tool activity and outcomes mapped from `tool.execution_start` and
+  `tool.execution_complete` events;
+- session continuity through persisted Copilot session IDs passed back with
+  `copilot --resume <sessionId>`;
+- one-shot image/PDF attachments through `copilot --attachment <path>`;
+- Memory and Knowledge Base MCP injection through
+  `copilot --additional-mcp-config <json>`;
+- credits-style usage reporting (premium requests plus assistant output tokens);
+  Copilot does not expose input tokens or per-turn USD cost, so cost reporting is
+  unavailable;
+- no plan mode, subagents, mid-turn input, or interactive user questions through
+  Agent Cockpit today;
+- no confirmed native durable-memory directory for Agent Cockpit to import or
+  watch. Copilot memory integration uses Agent Cockpit's Memory MCP tools.

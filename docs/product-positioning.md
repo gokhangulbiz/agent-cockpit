@@ -78,12 +78,12 @@ Use this order when public copy needs to be brief:
 1. Local browser UI for CLI AI agents.
 2. Conversations and context stay on your machine.
 3. Switch providers without losing accumulated workspace understanding.
-4. Works today with Claude Code, Codex, Kiro, OpenCode, and Grok Build.
+4. Works today with Claude Code, Codex, Kiro, OpenCode, Grok Build, and GitHub Copilot.
 5. Production installers manage the local server on macOS, Linux, and Windows.
 
 ## Proof Points
 
-- Supports Claude Code, OpenAI Codex, Kiro, OpenCode, and Grok Build as local
+- Supports Claude Code, OpenAI Codex, Kiro, OpenCode, Grok Build, and GitHub Copilot as local
   backends.
 - Stores workspace-scoped conversations, sessions, memory, and knowledge-base
   artifacts locally.

@@ -238,7 +238,7 @@ export interface CurrentUserResponse {
 export interface CliProfile {
   id: string;
   name: string;
-  harness: 'codex' | 'claude-code' | 'kiro' | 'opencode' | 'grok-build';
+  harness: 'codex' | 'claude-code' | 'kiro' | 'opencode' | 'grok-build' | 'copilot';
   protocol?: 'standard' | 'interactive';
   opencode?: {
     provider?: string;

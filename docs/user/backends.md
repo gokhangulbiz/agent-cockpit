@@ -10,6 +10,7 @@ authenticated on the same machine that runs the Agent Cockpit server.
 | Grok Build | `grok` | Coding, native goals, plan approval and subagents | Uses ACP plus native extensions; reuses terminal login, reports model usage/cost and optional account billing. |
 | Kiro | `kiro-cli` | ACP-based workflows and Kiro-specific projects | Uses ACP over stdin/stdout and reports credits/context percentage rather than token cost. |
 | OpenCode | `opencode` | Multi-provider coding through DeepSeek, Groq, Gemini, OpenRouter, and similar providers | Self-configured provider credentials and model routing. Supports thinking, tool activity, and session resume. |
+| GitHub Copilot | `copilot` | Coding with Copilot subscription models (Claude and GPT) | Self-configured CLI login. Supports thinking, tool activity, attachments, and session resume. Reports premium-request credits rather than USD cost. |
 
 For the full feature matrix, see [BACKENDS.md](../../BACKENDS.md).
 
@@ -118,6 +119,37 @@ An interrupted active turn is not automatically reattached or replayed.
 Compatibility is verified with Grok Build 1.0.52 on macOS arm64. Native Windows
 and Linux compatibility, and authorization with a real valid API key, still need
 validation.
+
+## GitHub Copilot
+
+Install the GitHub Copilot CLI and authenticate it on the server machine before
+selecting GitHub Copilot as a backend:
+
+```bash
+npm install -g @github/copilot
+```
+
+Then start `copilot` once in a terminal and run the `/login` command to sign in
+with your GitHub account. Agent Cockpit reuses that CLI login from `~/.copilot`;
+it checks availability with `copilot --version` but does not manage the login
+itself. Use the **Check GitHub Copilot** button on the profile to confirm the
+CLI is available.
+
+Agent Cockpit talks to GitHub Copilot through non-interactive runs
+(`copilot -p <prompt> --output-format json`), streams visible thinking and tool
+activity, and resumes later turns through Copilot session IDs. Because the CLI
+exposes no machine-readable model listing, Agent Cockpit ships a curated catalog
+of Copilot's Claude and GPT model identifiers; pick one per conversation in the
+composer. Reasoning effort maps to `--reasoning-effort` for supported levels.
+
+GitHub Copilot reports premium-request credits and assistant output tokens
+rather than USD cost, so per-turn cost is not shown. GitHub Copilot does not
+currently support subagents, goal mode, plan mode, mid-turn user input, or
+interactive user questions through Agent Cockpit.
+
+Image and PDF one-shot workflows, including attachment OCR and Knowledge Base
+image conversion, are sent through `copilot --attachment` with a multimodal
+model selected.
 
 ## Backend Switching
 

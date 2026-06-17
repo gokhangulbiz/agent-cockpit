@@ -7,6 +7,7 @@ import { resolveClaudeCliRuntime } from './backends/claudeCode';
 import { resolveCodexCliRuntime } from './backends/codex';
 import { resolveOpenCodeCliRuntime } from './backends/opencode';
 import { grokAuthenticationStatus, resolveGrokCliRuntime } from './backends/grokRuntime';
+import { resolveCopilotCliRuntime } from './backends/copilot';
 import { buildCliCommandInvocation, type CliCommandResolution } from './cliCommandResolver';
 import { isSetupAccountCliProfile } from './cliProfiles';
 
@@ -290,7 +291,7 @@ export class CliProfileAuthService {
   }
 
   private _assertSupported(profile: CliProfile): void {
-    if (profile.harness !== 'codex' && profile.harness !== 'claude-code' && profile.harness !== 'opencode' && profile.harness !== 'grok-build') {
+    if (profile.harness !== 'codex' && profile.harness !== 'claude-code' && profile.harness !== 'opencode' && profile.harness !== 'grok-build' && profile.harness !== 'copilot') {
       throw new Error('CLI status checks are not supported for Kiro profiles yet.');
     }
   }
@@ -299,7 +300,9 @@ export class CliProfileAuthService {
     if (profile.harness !== 'codex' && profile.harness !== 'claude-code' && profile.harness !== 'grok-build') {
       throw new Error(profile.harness === 'opencode'
         ? 'Remote authentication is not supported for OpenCode profiles yet. Configure OpenCode with opencode auth login.'
-        : 'Remote authentication is not supported for Kiro profiles yet.');
+        : profile.harness === 'copilot'
+          ? 'Remote authentication is not supported for GitHub Copilot profiles yet. Sign in from a terminal with copilot, then run /login.'
+          : 'Remote authentication is not supported for Kiro profiles yet.');
     }
     if (profile.disabled) {
       throw new Error(`CLI profile is disabled: ${profile.name}`);
@@ -316,7 +319,9 @@ export class CliProfileAuthService {
         ? resolveOpenCodeCliRuntime(profile)
         : profile.harness === 'grok-build'
           ? resolveGrokCliRuntime(profile)
-          : resolveClaudeCliRuntime(profile);
+          : profile.harness === 'copilot'
+            ? resolveCopilotCliRuntime(profile)
+            : resolveClaudeCliRuntime(profile);
     if (runtime.configDir) {
       await fsp.mkdir(runtime.configDir, { recursive: true });
     }
@@ -333,6 +338,7 @@ export class CliProfileAuthService {
     if (profile.harness === 'codex') return { args: ['login', 'status'] };
     if (profile.harness === 'opencode') return { args: ['--version'] };
     if (profile.harness === 'grok-build') return { args: [] }; // ACP verifies auth; there is no CLI auth-status command.
+    if (profile.harness === 'copilot') return { args: ['--version'] };
     return { args: ['auth', 'status', '--json'] };
   }
 
@@ -341,11 +347,12 @@ export class CliProfileAuthService {
     if (profile.harness === 'claude-code') return 'claude';
     if (profile.harness === 'opencode') return 'opencode';
     if (profile.harness === 'grok-build') return 'grok';
+    if (profile.harness === 'copilot') return 'copilot';
     return 'kiro-cli';
   }
 
   private _harnessLabel(profile: CliProfile): string {
-    return profile.harness === 'codex' ? 'Codex' : profile.harness === 'claude-code' ? 'Claude Code' : profile.harness === 'opencode' ? 'OpenCode' : profile.harness === 'grok-build' ? 'Grok Build' : 'Kiro';
+    return profile.harness === 'codex' ? 'Codex' : profile.harness === 'claude-code' ? 'Claude Code' : profile.harness === 'opencode' ? 'OpenCode' : profile.harness === 'grok-build' ? 'Grok Build' : profile.harness === 'copilot' ? 'GitHub Copilot' : 'Kiro';
   }
 
   private _addEvent(snapshot: CliAuthJobSnapshot, type: CliAuthEventType, text: string): void {
@@ -578,6 +585,11 @@ function interpretCliAuthStatus(
     return exitCode === 0
       ? { authenticated: null }
       : { authenticated: null, error: `OpenCode version check exited with code ${exitCode ?? 'unknown'}.` };
+  }
+  if (profile.harness === 'copilot') {
+    return exitCode === 0
+      ? { authenticated: null }
+      : { authenticated: null, error: `GitHub Copilot version check exited with code ${exitCode ?? 'unknown'}.` };
   }
   if (profile.harness !== 'claude-code') {
     return exitCode === 0

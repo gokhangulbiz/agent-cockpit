@@ -92,7 +92,7 @@ See [docs/adr/README.md](adr/README.md) for the index and [ADR-0001](adr/0001-re
 
 ## 1. Overview
 
-**Agent Cockpit** is a web-based chat interface for interacting with local CLI-based AI agents such as Claude Code, Kiro, OpenAI Codex, OpenCode, and Grok Build. It runs on the same machine as the CLI tools. The server spawns or connects to local CLI processes, streams responses back to the browser via WebSocket, and stores conversations in workspace-scoped files on disk.
+**Agent Cockpit** is a web-based chat interface for interacting with local CLI-based AI agents such as Claude Code, Kiro, OpenAI Codex, OpenCode, Grok Build, and GitHub Copilot. It runs on the same machine as the CLI tools. The server spawns or connects to local CLI processes, streams responses back to the browser via WebSocket, and stores conversations in workspace-scoped files on disk.
 
 ### Core Use Case
 

@@ -21,6 +21,7 @@ const HARNESS_COMMANDS: Partial<Record<CliHarness, string>> = {
   codex: 'codex',
   opencode: 'opencode',
   'grok-build': 'grok',
+  copilot: 'copilot',
 };
 
 const HARNESS_PACKAGES: Partial<Record<CliHarness, string[]>> = {

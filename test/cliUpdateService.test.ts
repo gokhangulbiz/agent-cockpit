@@ -120,6 +120,46 @@ describe('CliUpdateService', () => {
     });
   });
 
+  test('includes GitHub Copilot profile targets and exposes its self-updater', async () => {
+    const copilotBin = path.join(tmpDir, 'copilot');
+    fs.writeFileSync(copilotBin, '#!/bin/sh\n');
+    settings = {
+      theme: 'system',
+      sendBehavior: 'enter',
+      systemPrompt: '',
+      cliProfiles: [{
+        id: 'profile-copilot',
+        name: 'GitHub Copilot',
+        harness: 'copilot',
+        authMode: 'server-configured',
+        command: copilotBin,
+        createdAt: '2026-06-04T00:00:00.000Z',
+        updatedAt: '2026-06-04T00:00:00.000Z',
+      }],
+    };
+    const service = new CliUpdateService(tmpDir);
+    mockExecFile((cmd, args) => {
+      if (cmd === copilotBin && args.join(' ') === '--version') return 'GitHub Copilot CLI 1.0.48-2.';
+      return new Error(`unexpected command: ${cmd} ${args.join(' ')}`);
+    });
+
+    const status = await service.checkNow(async () => settings);
+
+    expect(status.items).toHaveLength(1);
+    expect(status.items[0]).toMatchObject({
+      harness: 'copilot',
+      label: 'GitHub Copilot',
+      command: copilotBin,
+      resolvedPath: copilotBin,
+      profileIds: ['profile-copilot'],
+      profileNames: ['GitHub Copilot'],
+      installMethod: 'self-update',
+      currentVersion: '1.0.48-2',
+      updateSupported: true,
+      updateCommand: [copilotBin, 'update'],
+    });
+  });
+
   test('includes OpenCode profile targets and exposes its self-updater', async () => {
     const opencodeBin = path.join(tmpDir, 'opencode');
     fs.writeFileSync(opencodeBin, '#!/bin/sh\n');

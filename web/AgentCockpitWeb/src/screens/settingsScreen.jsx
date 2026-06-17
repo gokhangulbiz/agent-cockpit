@@ -38,6 +38,7 @@ const CLI_HARNESS_OPTIONS = [
   { id: 'kiro', label: 'Kiro' },
   { id: 'opencode', label: 'OpenCode' },
   { id: 'grok-build', label: 'Grok Build' },
+  { id: 'copilot', label: 'GitHub Copilot' },
 ];
 
 function cliHarnessForBackend(backendId){
@@ -92,6 +93,11 @@ function normalizeUiProfile(profile){
       : undefined;
   } else {
     delete next.opencode;
+  }
+  if (next.harness === 'copilot') {
+    next.authMode = 'server-configured';
+    delete next.configDir;
+    delete next.env;
   }
   return next;
 }
@@ -178,7 +184,7 @@ function bedrockEnvWarning(profile){
 }
 
 function cliDefaultCommand(harness){
-  return harness === 'codex' ? 'codex' : harness === 'kiro' ? 'kiro-cli' : harness === 'opencode' ? 'opencode' : harness === 'grok-build' ? 'grok' : 'claude';
+  return harness === 'codex' ? 'codex' : harness === 'kiro' ? 'kiro-cli' : harness === 'opencode' ? 'opencode' : harness === 'grok-build' ? 'grok' : harness === 'copilot' ? 'copilot' : 'claude';
 }
 
 function defaultCliProfileName(harness){
@@ -195,6 +201,7 @@ function cliSelfConfiguredHome(harness){
   if (harness === 'claude-code') return '~/.claude';
   if (harness === 'opencode') return '~/.local/share/opencode and ~/.config/opencode';
   if (harness === 'grok-build') return '~/.grok';
+  if (harness === 'copilot') return '~/.copilot';
   return 'the server Kiro CLI account';
 }
 
@@ -951,7 +958,7 @@ function CliProfilesTab({ settings, backends, onPatch, onSave, saving, onValidat
 
   function onHarnessChange(profile, harness){
     setEnvErrorsById(prev => ({ ...prev, [profile.id]: '' }));
-    if (harness === 'kiro' || harness === 'opencode') {
+    if (harness === 'kiro' || harness === 'opencode' || harness === 'copilot') {
       setEnvTextById(prev => ({ ...prev, [profile.id]: '' }));
     }
     patchProfile(profile.id, current => {
@@ -959,10 +966,10 @@ function CliProfilesTab({ settings, backends, onPatch, onSave, saving, onValidat
         harness,
         name: usesGeneratedCliProfileName(current) ? defaultCliProfileName(harness) : current.name,
         protocol: harness === 'claude-code' ? (current.protocol || 'standard') : undefined,
-        authMode: (harness === 'kiro' || harness === 'opencode') ? 'server-configured' : current.authMode,
+        authMode: (harness === 'kiro' || harness === 'opencode' || harness === 'copilot') ? 'server-configured' : current.authMode,
         opencode: harness === 'opencode' ? (current.opencode || {}) : undefined,
       };
-      if (harness === 'kiro' || harness === 'opencode') {
+      if (harness === 'kiro' || harness === 'opencode' || harness === 'copilot') {
         next.command = undefined;
         next.configDir = undefined;
         next.env = undefined;
@@ -1222,11 +1229,12 @@ function CliProfilesTab({ settings, backends, onPatch, onSave, saving, onValidat
         ) : profiles.map(profile => {
           const isKiro = profile.harness === 'kiro';
           const isOpenCode = profile.harness === 'opencode';
+          const isCopilot = profile.harness === 'copilot';
           const isClaudeCode = profile.harness === 'claude-code';
           const claudeCodeProvider = claudeProvider(profile);
           const isClaudeBedrock = isClaudeCode && claudeCodeProvider === 'bedrock';
           const isServerProfile = isServerConfiguredProfile(profile);
-          const isAccount = !isKiro && !isOpenCode && profile.authMode === 'account';
+          const isAccount = !isKiro && !isOpenCode && !isCopilot && profile.authMode === 'account';
           const expanded = expandedProfileId === profile.id;
           const setupLabel = isAccount ? 'Account profile' : 'Self-configured';
           const envError = envErrorsById[profile.id];
@@ -1389,11 +1397,11 @@ function CliProfilesTab({ settings, backends, onPatch, onSave, saving, onValidat
                     ) : null}
                   </div>
                   <div className="cli-profile-grid">
-                    <Field label="Setup mode" hint={isKiro ? 'Kiro is self-configured only for now.' : isOpenCode ? 'OpenCode provider credentials are managed by OpenCode for now.' : undefined}>
+                    <Field label="Setup mode" hint={isKiro ? 'Kiro is self-configured only for now.' : isOpenCode ? 'OpenCode provider credentials are managed by OpenCode for now.' : isCopilot ? 'GitHub Copilot reuses the copilot CLI login already on this server.' : undefined}>
                       <div className="settings-select-wrap">
                         <select
-                          value={(isKiro || isOpenCode) ? 'server-configured' : (profile.authMode || 'server-configured')}
-                          disabled={isKiro || isOpenCode}
+                          value={(isKiro || isOpenCode || isCopilot) ? 'server-configured' : (profile.authMode || 'server-configured')}
+                          disabled={isKiro || isOpenCode || isCopilot}
                           onChange={(e) => onSetupModeChange(profile, e.target.value)}
                         >
                           <option value="server-configured">Self-configured</option>
@@ -1561,24 +1569,26 @@ function CliProfilesTab({ settings, backends, onPatch, onSave, saving, onValidat
                               <>Configure Kiro on the server and use this self-configured profile. Kiro does not expose a dedicated account/config directory override yet.</>
                             ) : isOpenCode ? (
                               <>Configure OpenCode on the server with <code>opencode auth login</code>. This profile selects the OpenCode provider.</>
+                            ) : isCopilot ? (
+                              <>Sign in to GitHub Copilot on the server by running <code>copilot</code> and the <code>/login</code> command. This profile reuses that CLI login from <code>~/.copilot</code>.</>
                             ) : isClaudeBedrock ? (
                               <>This Bedrock profile inherits the host's existing <code>{cliSelfConfiguredHome(profile.harness)}</code> directory and applies the environment overrides above at runtime.</>
                             ) : (
                               <>Self-configured profiles inherit the host's existing <code>{cliSelfConfiguredHome(profile.harness)}</code> directory and shell environment. No directory or env overrides needed.</>
                             )}
                           </div>
-                          {isOpenCode ? (
+                          {(isOpenCode || isCopilot) ? (
                             <div className="cli-auth-actions" style={{marginTop: 10}}>
                               <button
                                 type="button"
                                 className="btn"
                                 disabled={saving || authBusy}
                                 onClick={() => checkProfileAuth(profile)}
-                              >Check OpenCode</button>
+                              >{isCopilot ? 'Check GitHub Copilot' : 'Check OpenCode'}</button>
                               <span className={`cli-auth-status ${authRunning ? 'running' : ''}`}>{authStateLabel(authState)}</span>
                             </div>
                           ) : null}
-                          {isOpenCode && authText ? <pre className="cli-auth-log">{authText}</pre> : null}
+                          {(isOpenCode || isCopilot) && authText ? <pre className="cli-auth-log">{authText}</pre> : null}
                         </div>
                       </div>
                     </>

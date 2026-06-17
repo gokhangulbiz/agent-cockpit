@@ -11,6 +11,7 @@ import {
 import { resolveCodexCliRuntime } from './backends/codex';
 import { resolveOpenCodeCliRuntime } from './backends/opencode';
 import { resolveGrokCliRuntime } from './backends/grok';
+import { resolveCopilotCliRuntime } from './backends/copilot';
 import { buildCliCommandInvocation, windowsCmdCommandLine, type CliCommandResolution } from './cliCommandResolver';
 import { serverConfiguredCliProfileId } from './cliProfiles';
 import { ensureWindowsCliToolWrappers } from './windowsCliToolWrappers';
@@ -36,6 +37,7 @@ const HARNESS_LABELS: Record<CliHarness, string> = {
   kiro: 'Kiro',
   opencode: 'OpenCode',
   'grok-build': 'Grok Build',
+  copilot: 'GitHub Copilot',
 };
 
 const HARNESS_DEFAULT_COMMANDS: Record<CliHarness, string> = {
@@ -44,12 +46,14 @@ const HARNESS_DEFAULT_COMMANDS: Record<CliHarness, string> = {
   kiro: 'kiro-cli',
   opencode: 'opencode',
   'grok-build': 'grok',
+  copilot: 'copilot',
 };
 
 const HARNESS_NPM_PACKAGES: Partial<Record<CliHarness, string>> = {
   'claude-code': '@anthropic-ai/claude-code',
   codex: '@openai/codex',
   'grok-build': '@xai-official/grok',
+  copilot: '@github/copilot',
 };
 
 interface CliRuntimeTarget extends CliCommandResolution {
@@ -258,6 +262,7 @@ export class CliUpdateService {
       else delete env.GROK_HOME;
       return { ...runtime, env };
     }
+    if (profile.harness === 'copilot') return resolveCopilotCliRuntime(profile);
     return {
       command: HARNESS_DEFAULT_COMMANDS.kiro,
       env: { ...process.env },
@@ -371,7 +376,7 @@ export class CliUpdateService {
         }
       }
     }
-    if (target.harness === 'kiro' || target.harness === 'opencode' || target.harness === 'grok-build') {
+    if (target.harness === 'kiro' || target.harness === 'opencode' || target.harness === 'grok-build' || target.harness === 'copilot') {
       return { installMethod: 'self-update', resolvedPath };
     }
     return { installMethod: resolvedPath ? 'unknown' : 'missing', resolvedPath };
@@ -407,7 +412,7 @@ export class CliUpdateService {
     if (target.harness === 'opencode' && probe.installMethod === 'self-update') {
       return [target.command, ...(target.argsPrefix || []), 'upgrade'];
     }
-    if (target.harness === 'grok-build' && probe.installMethod === 'self-update') {
+    if ((target.harness === 'grok-build' || target.harness === 'copilot') && probe.installMethod === 'self-update') {
       return [target.command, ...(target.argsPrefix || []), 'update'];
     }
     return null;
@@ -492,7 +497,7 @@ export class CliUpdateService {
 }
 
 function isCliHarnessValue(value: unknown): value is CliHarness {
-  return value === 'codex' || value === 'claude-code' || value === 'kiro' || value === 'opencode' || value === 'grok-build';
+  return value === 'codex' || value === 'claude-code' || value === 'kiro' || value === 'opencode' || value === 'grok-build' || value === 'copilot';
 }
 
 function inferNpmPrefixFromPackagePath(resolvedPath: string, npmPackage: string): string | null {

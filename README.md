@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <em>A local browser cockpit for Claude Code, OpenAI Codex, Kiro, OpenCode, Grok Build, and future command-line AI agents.</em>
+  <em>A local browser cockpit for Claude Code, OpenAI Codex, Kiro, OpenCode, Grok Build, GitHub Copilot, and future command-line AI agents.</em>
 </p>
 
 <p align="center">
@@ -85,7 +85,7 @@ data from the vendor interface you happen to use today.
 ## Core Capabilities
 
 **Unified CLI interface**
-Run Claude Code, OpenAI Codex, Kiro, OpenCode, and Grok Build from a
+Run Claude Code, OpenAI Codex, Kiro, OpenCode, Grok Build, and GitHub Copilot from a
 browser-based chat surface. Switch backends per conversation while keeping the
 same workspace and interaction model.
 
@@ -148,6 +148,7 @@ passkeys, recovery codes, and optional legacy OAuth compatibility.
 | **Kiro** | `kiro-cli` | Fully supported |
 | **OpenCode** | `opencode` | Fully supported, self-configured provider credentials |
 | **Grok Build** | `grok` | Supported; verified on macOS, Windows/Linux validation pending |
+| **GitHub Copilot** | `copilot` | Fully supported, self-configured CLI login |
 
 See [BACKENDS.md](BACKENDS.md) and [docs/user/backends.md](docs/user/backends.md)
 for feature differences, auth notes, and setup guidance.
@@ -181,6 +182,8 @@ This has three important consequences:
   - [OpenCode CLI](https://opencode.ai/docs/cli/) (`opencode`)
   - [Grok Build CLI](https://docs.x.ai/build/overview) (`grok`, install with
     the official installer or `npm install -g @xai-official/grok`)
+  - [GitHub Copilot CLI](https://www.npmjs.com/package/@github/copilot) (`copilot`, install with
+    `npm install -g @github/copilot`)
 - Optional: [LibreOffice](https://www.libreoffice.org/) and/or
   [Pandoc](https://pandoc.org/) on `PATH` for broader Knowledge Base document
   conversion.

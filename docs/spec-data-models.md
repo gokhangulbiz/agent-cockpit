@@ -684,7 +684,7 @@ Together these guarantee that a workspace index always parses on disk and that c
     id: string,                 // UUIDv4
     title: string,              // Auto-set from first user message (max 80 chars)
     titleManuallySet?: boolean, // true once `renameConversation()` has run. Locks the title against all automatic mutations (resetSession, addMessage's first-message snapshot, generateAndUpdateTitle). Absent when the title is still auto-managed.
-    backend: string,            // Internal backend id: 'claude-code' | 'claude-code-interactive' | 'kiro' | 'codex' | 'opencode' | 'grok-build'. Kept for back-compat and transcript rendering. Some backends share a physical CLI harness/profile.
+    backend: string,            // Internal backend id: 'claude-code' | 'claude-code-interactive' | 'kiro' | 'codex' | 'opencode' | 'grok-build' | 'copilot'. Kept for back-compat and transcript rendering. Some backends share a physical CLI harness/profile.
     cliProfileId?: string,      // Runtime CLI profile selected for this conversation. When present, runtime adapter selection is derived from Settings.cliProfiles[id].harness plus Claude Code's optional protocol while command/auth/config still come from the physical profile.
     model?: string,             // Full model ID (e.g. 'claude-opus-5[1m]', 'claude-fable-5', 'claude-sonnet-5', 'claude-haiku-4-5'); absent = backend default
     effort?: string,            // Adaptive reasoning effort: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'; absent = model default. Supported values are backend/model-specific. Stale unsupported values are reconciled to `high` when available, then the first supported level, or removed when the model has no effort support.
@@ -1059,14 +1059,14 @@ Audits are append-only review records. They do not change `snapshot.json` direct
   workspacePath: string,
   sources: [{
     id: 'agents' | 'claude' | 'kiro',
-    harness: 'codex' | 'claude-code' | 'kiro' | 'opencode' | 'grok-build',
+    harness: 'codex' | 'claude-code' | 'kiro' | 'opencode' | 'grok-build' | 'copilot',
     label: string,
     expectedPath: string,
     present: boolean,
     paths: string[]        // workspace-relative files detected for that source
   }],
   harnesses: [{
-    harness: 'codex' | 'claude-code' | 'kiro' | 'opencode' | 'grok-build',
+    harness: 'codex' | 'claude-code' | 'kiro' | 'opencode' | 'grok-build' | 'copilot',
     label: string,
     sourceId: 'agents' | 'claude' | 'kiro',
     expectedPath: string,
@@ -1673,7 +1673,7 @@ type CliInstallMethod = 'npm-global' | 'self-update' | 'unknown' | 'missing';
 
 interface CliUpdateStatus {
   id: string;
-  harness: 'claude-code' | 'codex' | 'kiro' | 'opencode' | 'grok-build';
+  harness: 'claude-code' | 'codex' | 'kiro' | 'opencode' | 'grok-build' | 'copilot';
   label: string;
   command: string;
   resolvedPath: string | null;
@@ -1771,7 +1771,7 @@ interface CliUpdatesResponse {
 }
 ```
 
-`cliProfiles` is the global list of runnable CLI harness identities. Fresh settings start with an empty `cliProfiles` array and no provider default; the app does not create a Claude Code profile until a user configures Claude Code, selects a Claude backend explicitly, or a legacy settings/conversation migration requires it ([ADR-0061](adr/0061-use-configured-cli-profiles-as-default-runtime.md)). The current implementation supports server-configured and account/custom profiles for Codex, Claude Code, and Grok Build, self-configured profiles for Kiro, and self-configured profiles for OpenCode ([ADR-0076](adr/0076-add-opencode-cli-profiles.md)). It resolves `cliProfileId → CliProfile` for command/auth/config plus the runtime communication path. Claude Code profiles also carry `protocol: "standard" | "interactive"`: `standard` maps to internal backend `claude-code`, while `interactive` maps to internal backend `claude-code-interactive`. `claude-code-interactive` is therefore not a separate profile harness; it shares `harness: "claude-code"` for `command`, `env`, `CLAUDE_CONFIG_DIR`, auth, plan usage, and CLI update targets.
+`cliProfiles` is the global list of runnable CLI harness identities. Fresh settings start with an empty `cliProfiles` array and no provider default; the app does not create a Claude Code profile until a user configures Claude Code, selects a Claude backend explicitly, or a legacy settings/conversation migration requires it ([ADR-0061](adr/0061-use-configured-cli-profiles-as-default-runtime.md)). The current implementation supports server-configured and account/custom profiles for Codex, Claude Code, and Grok Build, self-configured profiles for Kiro, self-configured profiles for OpenCode ([ADR-0076](adr/0076-add-opencode-cli-profiles.md)), and self-configured profiles for GitHub Copilot ([ADR-0093](adr/0093-add-github-copilot-cli-backend.md)). It resolves `cliProfileId → CliProfile` for command/auth/config plus the runtime communication path. Claude Code profiles also carry `protocol: "standard" | "interactive"`: `standard` maps to internal backend `claude-code`, while `interactive` maps to internal backend `claude-code-interactive`. `claude-code-interactive` is therefore not a separate profile harness; it shares `harness: "claude-code"` for `command`, `env`, `CLAUDE_CONFIG_DIR`, auth, plan usage, and CLI update targets.
 
 Claude Code profiles may also carry `claudeCode.provider`, normalized to `"anthropic"` when missing and currently either `"anthropic"` or `"bedrock"` ([ADR-0090](adr/0090-represent-claude-code-bedrock-as-a-cli-profile-provider.md)). Anthropic profiles use the static Claude Code model catalog, where `claude-sonnet-5-5` is the default and models such as `claude-opus-5-5[1m]` and `claude-sonnet-5-5` support `low`, `medium`, `high`, `xhigh`, and `max` effort. Bedrock profiles keep AWS/Claude runtime values in the existing `env` object (`CLAUDE_CODE_USE_BEDROCK`, `AWS_REGION`/`AWS_DEFAULT_REGION`, `AWS_PROFILE`, bearer-token env vars, etc.) and store model routing separately at `claudeCode.bedrock.inferenceProfiles[]`. Each inference profile row is `{ id, name, inferenceProfileId, baseModelId?, default? }`: `name` is the user-facing model label, `inferenceProfileId` is the exact Bedrock inference profile ID or ARN passed to Claude Code as `--model`, `baseModelId` optionally points at a known static Claude model such as `claude-opus-5[1m]` or `claude-fable-5` so Agent Cockpit can inherit capabilities/effort metadata, and only one row can be default. `SettingsService.saveSettings()` trims row strings, drops all-empty rows, generates stable missing row IDs from the name/profile id, keeps only the first `default:true`, and marks the first row default when none is selected.
 
