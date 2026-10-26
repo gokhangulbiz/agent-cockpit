@@ -1,6 +1,8 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { EventEmitter } from 'events';
+import { PassThrough } from 'stream';
 import type { CliProfile, StreamEvent } from '../src/types';
 import { CopilotAdapter, __copilotTestUtils, resolveCopilotCliRuntime } from '../src/services/backends/copilot';
 
@@ -47,11 +49,19 @@ describe('Copilot backend metadata', () => {
     expect(COPILOT_MODELS.length).toBeGreaterThan(0);
     const ids = COPILOT_MODELS.map(model => model.id);
     expect(ids).toContain('claude-sonnet-4.6');
-    expect(ids).toContain('gpt-5.2');
+    expect(ids).toContain('gpt-6.1-sol');
+    expect(ids).toContain('claude-sonnet-5.5');
+    expect(ids).not.toContain('gpt-4.1');
     const defaults = COPILOT_MODELS.filter(model => model.default);
     expect(defaults).toHaveLength(1);
+    expect(defaults[0].id).toBe('auto');
     for (const model of COPILOT_MODELS) {
-      expect(model.supportedEffortLevels).toEqual(['low', 'medium', 'high', 'xhigh']);
+      expect(model.capabilities?.input?.pdf).toBe(true);
+      if (model.id === 'auto' || model.id.startsWith('claude-haiku')) {
+        expect(model.supportedEffortLevels).toBeUndefined();
+      } else {
+        expect(model.supportedEffortLevels).toEqual(['low', 'medium', 'high', 'xhigh']);
+      }
     }
   });
 
@@ -63,6 +73,24 @@ describe('Copilot backend metadata', () => {
 });
 
 describe('resolveCopilotCliRuntime', () => {
+  test('prefers the Windows npm package entrypoint over its command shim', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'copilot-windows-'));
+    const loader = path.join(root, 'cli-tools', 'node_modules', '@github', 'copilot', 'npm-loader.js');
+    fs.mkdirSync(path.dirname(loader), { recursive: true });
+    fs.writeFileSync(loader, '');
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    try {
+      const runtime = resolveCopilotCliRuntime(copilotProfile({ env: { AGENT_COCKPIT_DATA_DIR: path.join(root, 'data') } }));
+      expect(runtime.command).toBe(process.execPath);
+      expect(runtime.argsPrefix).toEqual([loader]);
+      expect(runtime.windowsCmdShim).toBeUndefined();
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('defaults to the copilot command and applies profile env', () => {
     const runtime = resolveCopilotCliRuntime(copilotProfile({ env: { FOO: 'bar', PATH: '/usr/bin:/bin' } }));
     expect(runtime.command).toContain('copilot');
@@ -85,7 +113,7 @@ describe('buildCopilotRunArgs', () => {
   test('builds non-interactive JSON args with full access for the chat path', () => {
     const args = buildCopilotRunArgs('hello world', {
       workingDir: '/tmp/workspace',
-      model: 'gpt-5.2',
+      model: 'gpt-6.1-sol',
       effort: 'high',
       externalSessionId: 'sess-123',
       allowTools: true,
@@ -93,16 +121,22 @@ describe('buildCopilotRunArgs', () => {
     expect(args.slice(0, 8)).toEqual(['-p', 'hello world', '--output-format', 'json', '--no-ask-user', '--no-color', '--log-level', 'none']);
     expect(args).toContain('--allow-all');
     expect(args).not.toContain('--allow-all-tools');
-    expect(args).toEqual(expect.arrayContaining(['--model', 'gpt-5.2']));
+    expect(args).toEqual(expect.arrayContaining(['--model', 'gpt-6.1-sol']));
+    expect(args).toEqual(expect.arrayContaining(['--stream', 'on', '--no-auto-update']));
     expect(args).toEqual(expect.arrayContaining(['--reasoning-effort', 'high']));
     expect(args).toEqual(expect.arrayContaining(['--resume', 'sess-123']));
   });
 
-  test('uses --allow-all-tools (not full access) for the no-tool one-shot path', () => {
+  test('explicitly removes tools from the restricted one-shot path', () => {
     const args = buildCopilotRunArgs('summarize', { workingDir: '/tmp' });
     expect(args).toContain('--allow-all-tools');
     expect(args).not.toContain('--allow-all');
     expect(args).not.toContain('--resume');
+    expect(args).toEqual(expect.arrayContaining(['--available-tools', 'none']));
+  });
+
+  test.each(['auto', 'claude-haiku-4.5', 'unknown-model'])('does not send reasoning effort for %s', model => {
+    expect(buildCopilotRunArgs('hi', { model, effort: 'high' })).not.toContain('--reasoning-effort');
   });
 
   test('ignores unsupported effort levels', () => {
@@ -138,6 +172,7 @@ describe('buildCopilotRunArgs', () => {
     });
     // MCP presence also implies broad access.
     expect(args).toContain('--allow-all');
+    expect(args).not.toContain('--available-tools');
   });
 });
 
@@ -149,6 +184,34 @@ describe('copilotMcpConfig', () => {
 });
 
 describe('translateCopilotLine', () => {
+  test('retains the tool name when native completion events omit it', () => {
+    const names = new Map<string, string>();
+    translateCopilotLine(JSON.stringify({
+      type: 'tool.execution_start', data: { toolCallId: 'bash1', toolName: 'bash', arguments: { command: 'true' } },
+    }), names);
+    expect(translateCopilotLine(JSON.stringify({
+      type: 'tool.execution_complete', data: { toolCallId: 'bash1', success: true, result: { content: '<exited with exit code 0>' } },
+    }), names)).toEqual([{
+      type: 'tool_outcomes', outcomes: [{ toolUseId: 'bash1', isError: false, outcome: 'exit 0', status: 'success' }],
+    }]);
+    expect(names.size).toBe(0);
+  });
+
+  test('recognizes native Memory MCP tool names', () => {
+    expect(translateCopilotLine(JSON.stringify({
+      type: 'tool.execution_start', data: { toolCallId: 'mem1', toolName: 'agent-cockpit-memory-memory_search', arguments: {} },
+    }))).toEqual([{
+      type: 'tool_activity', id: 'mem1', tool: 'memory_search', description: 'agent-cockpit-memory.memory_search',
+    }]);
+  });
+
+  test('surfaces structured session and terminal failures', () => {
+    expect(translateCopilotLine(JSON.stringify({ type: 'session.error', data: { message: 'Model unavailable' } })))
+      .toEqual([{ type: 'error', error: 'Model unavailable' }]);
+    expect(translateCopilotLine(JSON.stringify({ type: 'result', exitCode: 1, error: { message: 'Request failed' } })))
+      .toEqual([{ type: 'error', error: 'Request failed' }]);
+  });
+
   test('maps assistant.message_delta to streaming text', () => {
     const events = translateCopilotLine(JSON.stringify({
       type: 'assistant.message_delta',
@@ -256,6 +319,32 @@ describe('canonicalCopilotToolName', () => {
 });
 
 describe('collectCopilotJson', () => {
+  test('returns only the post-tool answer rather than pre-tool narration', () => {
+    expect(collectCopilotJson([
+      JSON.stringify({ type: 'assistant.message', data: { messageId: 'before', content: 'I will read the file.' } }),
+      JSON.stringify({ type: 'tool.execution_start', data: { toolCallId: 'read1', toolName: 'view' } }),
+      JSON.stringify({ type: 'assistant.message', data: { messageId: 'after', content: '{"answer":"done"}' } }),
+    ].join('\n')).text).toBe('{"answer":"done"}');
+  });
+
+  test('uses complete final text rather than a partial streamed prefix', () => {
+    expect(collectCopilotJson([
+      JSON.stringify({ type: 'assistant.message_delta', data: { messageId: 'm1', deltaContent: 'partial' } }),
+      JSON.stringify({ type: 'assistant.message', data: { messageId: 'm1', content: 'complete answer' } }),
+    ].join('\n')).text).toBe('complete answer');
+  });
+
+  test('does not duplicate a final message followed by a delta', () => {
+    expect(collectCopilotJson([
+      JSON.stringify({ type: 'assistant.message', data: { messageId: 'm1', content: 'answer' } }),
+      JSON.stringify({ type: 'assistant.message_delta', data: { messageId: 'm1', deltaContent: 'answer' } }),
+    ].join('\n')).text).toBe('answer');
+  });
+
+  test('rejects JSON-reported failures', () => {
+    expect(() => collectCopilotJson(JSON.stringify({ type: 'result', exitCode: 2 }))).toThrow('code 2');
+  });
+
   test('reconstructs streamed text, session id, and usage from JSONL', () => {
     const stdout = [
       JSON.stringify({ type: 'assistant.message_start', data: { messageId: 'm1' } }),
@@ -276,6 +365,7 @@ describe('collectCopilotJson', () => {
       costSource: 'none',
       credits: 3,
     });
+
   });
 
   test('falls back to final message content when no deltas were streamed', () => {
@@ -434,5 +524,242 @@ describe('CopilotAdapter streaming', () => {
       { type: 'text', content: 'again', streaming: true },
       { type: 'done' },
     ]));
+  });
+});
+
+class CopilotTestProcess extends EventEmitter {
+  pid = 4242;
+  stdout = new PassThrough();
+  stderr = new PassThrough();
+  kill = jest.fn((signal: NodeJS.Signals = 'SIGTERM') => {
+    this.finish([], 0, signal);
+    return true;
+  });
+
+  finish(events: Record<string, unknown>[] = [], code = 0, signal: NodeJS.Signals | null = null): void {
+    for (const event of events) this.stdout.write(JSON.stringify(event) + '\n');
+    this.stdout.end();
+    this.stderr.end();
+    this.emit('close', code, signal);
+  }
+}
+
+describe('Copilot lifecycle regressions', () => {
+  let workdir: string;
+  let processes: CopilotTestProcess[];
+  let spawn: jest.Mock;
+
+  beforeEach(() => {
+    workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'copilot-lifecycle-'));
+    processes = [];
+  });
+
+  afterEach(() => {
+    jest.dontMock('child_process');
+    fs.rmSync(workdir, { recursive: true, force: true });
+  });
+
+  function adapter(handler: (proc: CopilotTestProcess, index: number) => void): CopilotAdapter {
+    let result!: CopilotAdapter;
+    spawn = jest.fn(() => {
+      const proc = new CopilotTestProcess();
+      const index = processes.push(proc) - 1;
+      setImmediate(() => handler(proc, index));
+      return proc;
+    });
+    jest.isolateModules(() => {
+      jest.doMock('child_process', () => ({ spawn }));
+      const { CopilotAdapter: IsolatedAdapter } = require('../src/services/backends/copilot');
+      result = new IsolatedAdapter({ workingDir: workdir });
+    });
+    return result;
+  }
+
+  function options() {
+    return { sessionId: 'test-session', workingDir: workdir, systemPrompt: '', isNewSession: true };
+  }
+
+  async function collect(stream: AsyncGenerator<StreamEvent>): Promise<StreamEvent[]> {
+    const events: StreamEvent[] = [];
+    for await (const event of stream) events.push(event);
+    return events;
+  }
+
+  test('does not spawn a stream cancelled before consumption', async () => {
+    const result = adapter(proc => proc.finish()).sendMessage('hi', options());
+    result.abort();
+    expect(await collect(result.stream)).toEqual([
+      { type: 'error', error: 'Copilot turn aborted.', source: 'abort' },
+      { type: 'done' },
+    ]);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  test('does not spawn for an already-aborted one-shot signal', async () => {
+    const backend = adapter(proc => proc.finish());
+    const controller = new AbortController();
+    controller.abort();
+    await expect(backend.runOneShot('hi', { abortSignal: controller.signal })).rejects.toThrow('aborted');
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  test('rejects non-directory one-shot workspaces before spawning', async () => {
+    const file = path.join(workdir, 'file.txt');
+    fs.writeFileSync(file, '');
+    const backend = adapter(proc => proc.finish());
+    await expect(backend.runOneShot('hi', { workingDir: file })).rejects.toThrow('not a directory');
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  test('uses restricted one-shots for title and summary generation', async () => {
+    const backend = adapter(proc => proc.finish());
+    const run = jest.spyOn(backend, 'runOneShot').mockResolvedValue('  A useful\n title  ');
+    expect(await backend.generateTitle('hi', 'fallback')).toBe('A useful title');
+    expect(await backend.generateSummary([{ role: 'user', content: 'hi' }], 'fallback')).toBe('A useful\n title');
+    expect(run).toHaveBeenCalledWith(expect.stringContaining('user: hi'), { cliProfile: undefined, timeoutMs: 60_000 });
+  });
+
+  test('preserves title and summary fallbacks on one-shot failure', async () => {
+    const backend = adapter(proc => proc.finish());
+    jest.spyOn(backend, 'runOneShot').mockRejectedValue(new Error('CLI unavailable'));
+    expect(await backend.generateTitle('first\nmessage', '')).toBe('first message');
+    expect(await backend.generateSummary([], 'saved summary')).toBe('saved summary');
+  });
+
+  test('reports in-flight abort even when the child closes cleanly', async () => {
+    const result = adapter(() => {}).sendMessage('hi', options());
+    await result.stream.next();
+    result.abort();
+    expect(await collect(result.stream)).toEqual([
+      { type: 'error', error: 'Copilot turn aborted.', source: 'abort' },
+      { type: 'done' },
+    ]);
+    expect(processes[0].kill).toHaveBeenCalledWith('SIGTERM');
+  });
+
+  test('kills the child when the stream consumer stops', async () => {
+    const result = adapter(() => {}).sendMessage('hi', options());
+    await result.stream.next();
+    await result.stream.return(undefined);
+    expect(processes[0].kill).toHaveBeenCalledWith('SIGTERM');
+  });
+
+  test('one-shot timeout rejects rather than accepting a clean termination', async () => {
+    const backend = adapter(() => {});
+    await expect(backend.runOneShot('hi', { timeoutMs: 10 })).rejects.toThrow('timed out');
+    expect(processes[0].kill).toHaveBeenCalledWith('SIGTERM');
+  });
+
+  test('one-shot abort rejects rather than accepting a clean termination', async () => {
+    const controller = new AbortController();
+    const backend = adapter(() => controller.abort());
+    await expect(backend.runOneShot('hi', { abortSignal: controller.signal })).rejects.toThrow('aborted');
+    expect(processes[0].kill).toHaveBeenCalledWith('SIGTERM');
+  });
+
+  test('one-shot errors preserve structured diagnostics on nonzero exit', async () => {
+    const backend = adapter(proc => proc.finish([{ type: 'session.error', data: { message: 'Model unavailable' } }], 1));
+    await expect(backend.runOneShot('hi')).rejects.toThrow('Model unavailable');
+  });
+
+  test('stream errors preserve a failed JSON result even on zero process exit', async () => {
+    const backend = adapter(proc => proc.finish([{ type: 'result', exitCode: 1, message: 'Request failed' }]));
+    expect(await collect(backend.sendMessage('hi', options()).stream)).toEqual(expect.arrayContaining([
+      { type: 'error', error: 'Request failed' },
+      { type: 'done' },
+    ]));
+  });
+
+  test.each(['stream', 'one-shot'])('preserves split UTF-8 text in %s output', async mode => {
+    const text = '\u00e7\u011f\ud83d\ude80';
+    const backend = adapter(proc => {
+      const bytes = Buffer.from(JSON.stringify({ type: 'assistant.message_delta', data: { deltaContent: text } }) + '\n');
+      const split = bytes.indexOf(Buffer.from('\u00e7')) + 1;
+      proc.stdout.write(bytes.subarray(0, split));
+      proc.stdout.write(bytes.subarray(split));
+      proc.finish([{ type: 'assistant.message', data: { content: text } }]);
+    });
+    if (mode === 'one-shot') {
+      await expect(backend.runOneShot('hi')).resolves.toBe(text);
+    } else {
+      const events = await collect(backend.sendMessage('hi', options()).stream);
+      expect(events.filter(event => event.type === 'text')).toEqual([{ type: 'text', content: text, streaming: true }]);
+    }
+  });
+
+  test('recovers a missing resumed session from JSON diagnostics exactly once', async () => {
+    const backend = adapter((proc, index) => {
+      if (index === 0) proc.finish([{ type: 'session.error', data: { message: 'Session not found' } }], 1);
+      else proc.finish([{ type: 'result', sessionId: 'new-session', exitCode: 0 }]);
+    });
+    const createSnapshot = jest.fn(async () => ({
+      snapshotPath: '/tmp/recovery.md', sourceSessionPath: '/tmp/session.json',
+      sourceSessionNumber: 1, messageCount: 2, recoveryCount: 1,
+      capturedAt: '2026-10-26T00:00:00.000Z',
+    }));
+    const events = await collect(backend.sendMessage('continue', {
+      ...options(), isNewSession: false, externalSessionId: 'old-session', sessionRecovery: { createSnapshot },
+    }).stream);
+    expect(createSnapshot).toHaveBeenCalledTimes(1);
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(spawn.mock.calls[0][1]).toEqual(expect.arrayContaining(['--resume', 'old-session']));
+    expect(spawn.mock.calls[1][1]).not.toContain('--resume');
+    expect(spawn.mock.calls[1][1][1]).toContain('/tmp/recovery.md');
+    expect(events.filter(event => event.type === 'session_recovery')).toHaveLength(1);
+    expect(events.filter(event => event.type === 'error')).toHaveLength(0);
+  });
+
+  test('does not replay a failed turn after tools have started', async () => {
+    const backend = adapter(proc => {
+      proc.stderr.write('Session not found');
+      proc.finish([{ type: 'tool.execution_start', data: { toolCallId: 't1', toolName: 'bash' } }], 1);
+    });
+    const events = await collect(backend.sendMessage('continue', {
+      ...options(), isNewSession: false, externalSessionId: 'old-session',
+    }).stream);
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(events.filter(event => event.type === 'session_recovery')).toHaveLength(0);
+    expect(events.some(event => event.type === 'error')).toBe(true);
+  });
+
+  test('stops after one missing-session recovery attempt', async () => {
+    const backend = adapter(proc => proc.finish([{ type: 'session.error', data: { message: 'Session not found' } }], 1));
+    const events = await collect(backend.sendMessage('continue', {
+      ...options(), isNewSession: false, externalSessionId: 'old-session',
+    }).stream);
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(events.filter(event => event.type === 'session_recovery')).toHaveLength(1);
+    expect(events.filter(event => event.type === 'error')).toHaveLength(1);
+  });
+
+  test('subtracts the saved native usage baseline after an adapter restart', async () => {
+    const checkpoint = (input: number, output: number, credits: number) => ({
+      type: 'session.usage_checkpoint',
+      data: {
+        totalPremiumRequests: credits,
+        accountingSnapshot: { tokenDetails: {
+          input: { tokenCount: input }, output: { tokenCount: output },
+          cache_read: { tokenCount: 50 }, cache_write: { tokenCount: 100 },
+        } },
+      },
+    });
+    const dir = path.join(workdir, 'session-state', 'saved-session');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'events.jsonl'), JSON.stringify(checkpoint(10, 20, 2)) + '\n');
+    const backend = adapter(proc => proc.finish([
+      checkpoint(15, 27, 3),
+      { type: 'result', sessionId: 'saved-session', exitCode: 0, usage: { premiumRequests: 3 } },
+    ]));
+    const events = await collect(backend.sendMessage('continue', {
+      ...options(), isNewSession: false, externalSessionId: 'saved-session',
+      cliProfile: copilotProfile({ env: { COPILOT_HOME: workdir } }),
+    }).stream);
+    expect(events.find(event => event.type === 'usage')).toEqual({
+      type: 'usage',
+      usage: {
+        inputTokens: 5, outputTokens: 7, cacheReadTokens: 0, cacheWriteTokens: 0,
+        credits: 1, costUsd: 0, costSource: 'none',
+      },
+    });
   });
 });

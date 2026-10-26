@@ -1,10 +1,10 @@
 ---
 id: 0093
 title: Add GitHub Copilot CLI backend
-status: Accepted
+status: Superseded
 date: 2026-06-17
 supersedes: []
-superseded-by: null
+superseded-by: 0094
 tags: [cli-profiles, backends, copilot]
 affects:
   - src/types/cliProfiles.ts

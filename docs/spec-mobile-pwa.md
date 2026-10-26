@@ -129,6 +129,13 @@ The PWA currently covers:
 - Settings/default loading via `GET /api/chat/settings`.
 - Backend metadata loading via `GET /api/chat/backends`.
 - Profile-specific backend metadata loading via `GET /api/chat/cli-profiles/:profileId/metadata`.
+- GitHub Copilot profiles use the same metadata-driven model picker, assistant
+  label/icon, thinking/text/tool frames, session recovery notices, and usage
+  counters as desktop. `auto` is the default model; Haiku/auto do not show
+  reasoning-effort choices. Copilot goal, plan, interactive-question, and
+  mid-turn-input controls remain unavailable. Per-turn token/credit accounting
+  is performed on the server, and `costSource:'none'` keeps mobile cost `n/a`.
+  No Copilot-specific PWA assets, manifest, or service-worker changes are needed.
 - Active/archived conversation list via `GET /api/chat/conversations`.
 - Workspace-level archives are respected by the shared conversation-list contract: archived workspaces are excluded from the mobile active and archived conversation lists unless a caller explicitly asks for `includeArchivedWorkspaces`, which the PWA does not do. The PWA does not expose workspace archive management, remapping, file snapshot restore, or archived-data deletion; those remain desktop filesystem-management workflows.
 - Flat latest-first conversation list with a workspace select filter. `All conversations` is the default; choosing a workspace filters the list to that `workspaceId` without introducing collapsible workspace groups. Each card renders the workspace label in the header and keeps the timestamp in the footer beside message count/live status so the date appears only once.

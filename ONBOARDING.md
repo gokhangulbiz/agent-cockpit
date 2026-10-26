@@ -25,6 +25,7 @@ Install the following before you begin:
 | **Kiro CLI** | [kiro.dev](https://kiro.dev) | `kiro-cli version` |
 | **OpenCode CLI** | [OpenCode CLI docs](https://opencode.ai/docs/cli/) | `opencode --version` |
 | **Grok Build CLI** | [Grok Build docs](https://docs.x.ai/build/overview) or `npm install -g @xai-official/grok` | `grok --version` |
+| **GitHub Copilot CLI** | `npm install -g @github/copilot` | `copilot --version` |
 | **cloudflared** | `brew install cloudflared` | `cloudflared --version` |
 | **PM2** | Installed as a project dependency | `npx pm2 --version` after Agent Cockpit dependencies are installed |
 
@@ -300,9 +301,9 @@ working in a normal terminal first, then use Agent Cockpit Settings to choose
 the profile, protocol, provider, model, and auth mode that match that CLI.
 
 Claude Code, Codex, and Grok Build can use Cockpit-managed account profiles.
-Kiro and OpenCode are self-configured in Agent Cockpit: configure their provider
-or account state in the CLI's own tools, then select the matching profile in
-Agent Cockpit.
+Kiro, OpenCode, and GitHub Copilot are self-configured in Agent Cockpit:
+configure their provider or account state in the CLI's own tools, then select
+the matching profile in Agent Cockpit.
 
 ---
 

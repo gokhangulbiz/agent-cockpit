@@ -91,7 +91,9 @@ Native compatibility is verified on Grok Build 1.0.52, macOS arm64. See the
   availability with `copilot --version` but does not manage the login;
 - curated model catalog (Claude and GPT model identifiers) selectable per
   conversation, since the CLI exposes no machine-readable model listing;
-- reasoning effort through `copilot --reasoning-effort <low|medium|high|xhigh>`;
+- default `auto` routing plus explicit account-dependent model selections;
+- reasoning effort through `copilot --reasoning-effort <low|medium|high|xhigh>`
+  for explicit reasoning models, not automatic routing or Haiku;
 - visible thinking mapped from `assistant.reasoning_delta` JSONL events;
 - streaming assistant text mapped from `assistant.message_delta` events;
 - tool activity and outcomes mapped from `tool.execution_start` and
@@ -101,10 +103,16 @@ Native compatibility is verified on Grok Build 1.0.52, macOS arm64. See the
 - one-shot image/PDF attachments through `copilot --attachment <path>`;
 - Memory and Knowledge Base MCP injection through
   `copilot --additional-mcp-config <json>`;
-- credits-style usage reporting (premium requests plus assistant output tokens);
-  Copilot does not expose input tokens or per-turn USD cost, so cost reporting is
-  unavailable;
+- per-turn input/output/cache tokens and premium-request credits, derived by
+  subtracting saved native session checkpoints rather than recharging cumulative
+  resumed-session totals; no per-turn USD cost or estimate;
+- restricted text-only one-shots explicitly expose zero tools using
+  `--available-tools none`;
 - no plan mode, subagents, mid-turn input, or interactive user questions through
   Agent Cockpit today;
 - no confirmed native durable-memory directory for Agent Cockpit to import or
   watch. Copilot memory integration uses Agent Cockpit's Memory MCP tools.
+
+Native image/PDF/MCP/text/stream/resume/usage compatibility is verified with Copilot
+CLI 1.0.103-0 on macOS arm64 through `npm run e2e:copilot`. Windows package resolution
+has unit coverage; native Windows/Linux compatibility is not claimed.

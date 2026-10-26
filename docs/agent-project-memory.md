@@ -172,6 +172,11 @@ tool is unavailable.
 - Usage pricing should stay provider-specific. Codex/OpenAI service tiers,
   Claude token/cache pricing, Kiro credits, and future CLIs should use focused
   calculators or provider context rather than one growing generic formula.
+- Copilot restricted one-shots require the literal `--available-tools none`;
+  an empty value does not remove tools. Copilot usage checkpoints and premium
+  requests are native-session cumulative; subtract the saved checkpoint before
+  recording a resumed turn. Keep this logic in `backends/copilotUsage.ts` and
+  validate native text/stream/resume/usage with `npm run e2e:copilot`.
 - Claude Code Interactive is a separate protocol/backend path requiring real CLI
   compatibility checks when protocol behavior changes.
 - Do not auto-update Claude Code CLI as part of Claude Code Interactive

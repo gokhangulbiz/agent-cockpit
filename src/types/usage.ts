@@ -32,7 +32,7 @@ export interface Usage {
     longContextThresholdTokens?: number;
     usdPerCredit?: number;
   };
-  /** Kiro credits consumed (fractional, Kiro-specific unit). */
+  /** Harness-specific credits consumed: Kiro credits or Copilot premium requests. */
   credits?: number;
   /** Provider pricing tier for a raw usage event, such as OpenAI priority. Not meaningful on aggregate totals. */
   pricingTier?: string;

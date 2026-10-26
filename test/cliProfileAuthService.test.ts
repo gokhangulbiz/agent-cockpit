@@ -49,7 +49,7 @@ describe('CliProfileAuthService', () => {
       name: 'Claude Profile',
       harness,
       authMode: 'account',
-      command: path.join(tmpDir, harness === 'codex' ? 'codex' : harness === 'opencode' ? 'opencode' : 'claude'),
+      command: path.join(tmpDir, harness === 'codex' ? 'codex' : harness === 'opencode' ? 'opencode' : harness === 'copilot' ? 'copilot' : 'claude'),
       createdAt: '2026-06-01T00:00:00.000Z',
       updatedAt: '2026-06-01T00:00:00.000Z',
       ...overrides,
@@ -184,6 +184,24 @@ describe('CliProfileAuthService', () => {
   });
 
   describe('checkProfile', () => {
+    test('checks Copilot availability without claiming authentication', async () => {
+      const spawn = createSpawn(call => closeSoon(call, { stdout: 'GitHub Copilot CLI 1.0.103-0' }));
+      const service = makeService(spawn);
+      const profile = makeProfile({ harness: 'copilot', authMode: 'server-configured' });
+      expect(await service.checkProfile(profile)).toMatchObject({
+        harness: 'copilot', available: true, authenticated: null, status: 'ok',
+      });
+      expect(spawn).toHaveBeenCalledWith(path.join(tmpDir, 'copilot'), ['--version'], expect.any(Object));
+      await expect(service.startAuth(profile)).rejects.toThrow('Remote authentication is not supported for GitHub Copilot');
+    });
+
+    test('reports Copilot version-check failures as errors rather than logged-out accounts', async () => {
+      const service = makeService(createSpawn(call => closeSoon(call, { stderr: 'version failed', code: 2 })));
+      expect(await service.checkProfile(makeProfile({ harness: 'copilot' }))).toMatchObject({
+        available: true, authenticated: null, status: 'error', exitCode: 2,
+      });
+    });
+
     test('parses noisy Claude auth JSON with loggedIn=true', async () => {
       const spawn = createSpawn((call) => {
         closeSoon(call, { stdout: 'noise before\n{"loggedIn":true,"account":"daron"}\nnoise after' });

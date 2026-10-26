@@ -129,7 +129,7 @@ selecting GitHub Copilot as a backend:
 npm install -g @github/copilot
 ```
 
-Then start `copilot` once in a terminal and run the `/login` command to sign in
+Run `copilot login` (or start `copilot` and use `/login`) to sign in
 with your GitHub account. Agent Cockpit reuses that CLI login from `~/.copilot`;
 it checks availability with `copilot --version` but does not manage the login
 itself. Use the **Check GitHub Copilot** button on the profile to confirm the
@@ -139,17 +139,25 @@ Agent Cockpit talks to GitHub Copilot through non-interactive runs
 (`copilot -p <prompt> --output-format json`), streams visible thinking and tool
 activity, and resumes later turns through Copilot session IDs. Because the CLI
 exposes no machine-readable model listing, Agent Cockpit ships a curated catalog
-of Copilot's Claude and GPT model identifiers; pick one per conversation in the
-composer. Reasoning effort maps to `--reasoning-effort` for supported levels.
+of Copilot's Claude and GPT model identifiers. The default **auto** choice lets
+Copilot select an available model; explicit choices depend on your subscription
+and administrator policy. Reasoning effort is available for explicit reasoning
+models, not auto or Haiku.
 
-GitHub Copilot reports premium-request credits and assistant output tokens
-rather than USD cost, so per-turn cost is not shown. GitHub Copilot does not
+GitHub Copilot reports per-turn input/output/cache tokens and premium-request
+credits rather than USD cost. Resumed-session totals are subtracted so earlier
+turns are not counted again. If the native usage baseline cannot be read,
+uncertain cumulative charges are omitted. GitHub Copilot does not
 currently support subagents, goal mode, plan mode, mid-turn user input, or
 interactive user questions through Agent Cockpit.
 
 Image and PDF one-shot workflows, including attachment OCR and Knowledge Base
 image conversion, are sent through `copilot --attachment` with a multimodal
 model selected.
+
+Text-only one-shot jobs, such as title generation, run with no tools exposed.
+CLI updates stay under Agent Cockpit's update controls rather than being
+downloaded implicitly during a chat turn.
 
 ## Backend Switching
 

@@ -107,6 +107,18 @@ Codex App Server behavior is split across `src/services/backends/codex.ts`, `cod
 - When changing hand-typed Codex app-server protocol shapes, run or document the `codex app-server --enable goals generate-ts --out <DIR>` drift-diff procedure from `docs/spec-backend-services.md` and inspect `codexProtocol.ts`, `codexEvents.ts`, `codexModels.ts`, and `codexStreamDispatch.ts`.
 - No real-CLI Codex e2e suite exists today. Do not imply one is part of normal drift validation; creating one is separate scope unless a future issue or ADR adds that requirement.
 
+# GitHub Copilot Protocol Compatibility
+
+Review `test/copilotBackend.test.ts` and `test/copilotUsage.test.ts` when changing
+Copilot JSONL parsing, tool restrictions, native session recovery, runtime
+resolution, or usage. Run `npm run e2e:copilot` with an authenticated real
+`copilot` for native text/stream/resume/usage validation; the opt-in suite uses
+temporary synthetic workspaces and does not update the CLI. Keep restricted
+one-shots on `--available-tools none` (an empty value exposes tools), preserve
+UTF-8 stream decoding, and subtract the saved native usage checkpoint before
+charging resumed-session totals. Keep usage parsing under
+`src/services/backends/copilotUsage.ts`. See ADR-0094.
+
 # Grok Build Protocol Compatibility
 
 Grok Build uses ACP plus native extensions through the focused
