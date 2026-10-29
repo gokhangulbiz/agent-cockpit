@@ -28,7 +28,7 @@ export function installerFixture() {
   try {
     execFileSync(process.execPath, [
       'scripts/package-release.js', '--root', source, '--version', '1.2.3', '--out-dir', release,
-    ], { stdio: 'pipe' });
+    ], { stdio: 'pipe', timeout: 60_000 });
   } catch (error) {
     fs.rmSync(root, { recursive: true, force: true });
     throw error;
@@ -57,8 +57,9 @@ export function installerFixture() {
       const result = await exec(command, args, { env: { ...env, ...extra }, timeout: 60_000 });
       return { ...result, code: 0 };
     } catch (error) {
-      const result = error as Error & { stdout: string; stderr: string; code: number };
-      return { stdout: result.stdout || '', stderr: result.stderr || result.message, code: result.code || 1 };
+      const result = error as Error & { stdout?: string; stderr?: string; code?: number | string; signal?: NodeJS.Signals; killed?: boolean };
+      if (result.killed || result.signal || typeof result.code !== 'number') throw error;
+      return { stdout: result.stdout || '', stderr: result.stderr || result.message, code: result.code };
     }
   }
 

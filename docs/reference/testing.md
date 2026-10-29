@@ -38,6 +38,12 @@ state, packaging, and release-workflow guards. PowerShell function tests run
 when PowerShell is available; native Windows launch behavior is covered in CI,
 not inferred from running PowerShell on macOS/Linux.
 
+Fixture commands and package preparation have 60-second deadlines. Executable
+fixture tests allow four minutes for sequential commands and rollback, so the
+outer test timeout does not remove a fixture before its command deadline.
+Spawn failures, signals, and timeouts fail the test rather than counting as
+expected nonzero installer exits.
+
 The native runner packages the current built checkout, installs it under a
 temporary path containing spaces, uses isolated data/auth/PM2 state, checks
 readiness and required doctor checks, repairs the same version, and exercises
@@ -65,6 +71,9 @@ Use `--release-dir <directory>` to test an existing candidate and
 failure artifacts. Reports distinguish OS/architecture and runtime source and
 record the initial, repaired, recovered, and restarted process PIDs.
 The runner stops its isolated PM2 daemon and removes temporary install files.
+Windows cleanup removes only the temporary install's `cli-tools` entry from the
+current user PATH; it does not restore an old snapshot or discard entries added
+by other work during the test. Cleanup errors retain the report and install root.
 It does not register startup locally. `--auto-start` is allowed only with
 `CI=true` on disposable native runners; registration is not a real reboot test.
 

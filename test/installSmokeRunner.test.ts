@@ -1,8 +1,9 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { execFileSync, spawnSync } from 'child_process';
 
-const { runCommand } = require('../scripts/run-install-smoke.js');
+const { runCommand, windowsPathCleanupFunction } = require('../scripts/run-install-smoke.js');
 
 test('installer commands return when detached descendants retain inherited output', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'install-command-'));
@@ -37,4 +38,16 @@ test('installer command failures retain their stderr diagnostics', () => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+const shell = process.platform === 'win32' ? 'powershell.exe' : 'pwsh';
+const hasPowerShell = !spawnSync(shell, ['-NoProfile', '-Command', 'exit 0']).error;
+(hasPowerShell ? test : test.skip)('Windows smoke cleanup preserves PATH entries added during the run', () => {
+  const command = `
+${windowsPathCleanupFunction}
+$current = 'C:\\Existing;C:\\AddedDuringRun;D:/Fixture/cli-tools/;D:\\Fixture\\cli-tools-extra;C:\\Other'
+Remove-SmokePathEntry $current 'd:\\fixture\\cli-tools'
+`;
+  const output = execFileSync(shell, ['-NoProfile', '-Command', command], { encoding: 'utf8' });
+  expect(output.trim()).toBe('C:\\Existing;C:\\AddedDuringRun;D:\\Fixture\\cli-tools-extra;C:\\Other');
 });

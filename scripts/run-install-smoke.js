@@ -7,6 +7,14 @@ const path = require('node:path');
 const net = require('node:net');
 const { spawnSync } = require('node:child_process');
 
+const windowsPathCleanupFunction = String.raw`
+function Remove-SmokePathEntry {
+  param([string] $Current, [string] $Entry)
+  $key = $Entry.Trim().Replace('/', '\').TrimEnd('\')
+  return (($Current -split ';' | Where-Object { $_.Trim().Replace('/', '\').TrimEnd('\') -ine $key }) -join ';')
+}
+`;
+
 function runCommand(command, argv, options, outputRoot) {
   const directory = fs.mkdtempSync(path.join(outputRoot, 'command-'));
   const stdoutPath = path.join(directory, 'stdout.log');
@@ -91,7 +99,6 @@ async function main() {
   const port = server.address().port;
   await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   const baseURL = `http://127.0.0.1:${port}`;
-  let savedUserPath;
   const installerName = platform === 'win32' ? 'install-windows.ps1' : platform === 'darwin' ? 'install-macos.sh' : 'install-linux.sh';
   const installerArgs = platform === 'win32'
     ? ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(releaseDir, installerName), '-InstallDir', installDir, '-Port', String(port), '-SkipOpen', ...(privateNode ? ['-InstallNode'] : [])]
@@ -105,9 +112,7 @@ async function main() {
     const manifest = JSON.parse(fs.readFileSync(path.join(releaseDir, 'release-manifest.json'), 'utf8'));
     report.version = manifest.version;
     report.sourceCommit = manifest.sourceCommit;
-    if (platform === 'win32') {
-      savedUserPath = run(ps, ['-NoProfile', '-Command', "[Environment]::GetEnvironmentVariable('Path', 'User')"]).trim();
-    } else if (privateNode) {
+    if (platform !== 'win32' && privateNode) {
       const bin = path.join(root, 'no-system-node');
       fs.mkdirSync(bin);
       fs.writeFileSync(path.join(bin, 'node'), '#!/bin/sh\nexit 127\n', { mode: 0o755 });
@@ -227,10 +232,19 @@ async function main() {
       report.cleanupError = error.message;
       report.success = false;
     }
-    if (platform === 'win32' && savedUserPath !== undefined) {
-      run(ps, ['-NoProfile', '-Command', "[Environment]::SetEnvironmentVariable('Path', $env:INSTALL_SMOKE_SAVED_PATH, 'User')"], {
-        env: { ...env, INSTALL_SMOKE_SAVED_PATH: savedUserPath },
-      });
+    if (platform === 'win32') {
+      try {
+        run(ps, ['-NoProfile', '-Command', `${windowsPathCleanupFunction}
+$current = [Environment]::GetEnvironmentVariable('Path', 'User')
+if ($null -ne $current) {
+  $next = Remove-SmokePathEntry $current $env:INSTALL_SMOKE_PREFIX
+  if ($next -cne $current) { [Environment]::SetEnvironmentVariable('Path', $next, 'User') }
+}
+`], { env: { ...env, INSTALL_SMOKE_PREFIX: path.join(installDir, 'cli-tools') } });
+      } catch (error) {
+        report.cleanupError = [report.cleanupError, error.message].filter(Boolean).join('\n');
+        report.success = false;
+      }
     }
     const log = path.join(installDir, 'logs/install.log');
     if (fs.existsSync(log)) fs.copyFileSync(log, path.join(reportDir, 'install.log'));
@@ -241,5 +255,5 @@ async function main() {
   assert.ok(report.success, report.cleanupError || 'Installation smoke failed.');
 }
 
-module.exports = { runCommand };
+module.exports = { runCommand, windowsPathCleanupFunction };
 if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });

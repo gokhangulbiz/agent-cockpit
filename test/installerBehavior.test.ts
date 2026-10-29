@@ -6,6 +6,9 @@ import { spawnSync } from 'child_process';
 import { installerFixture, runPosix, runPowerShell, type InstallerFixture } from './helpers/installerFixture';
 import { InstallStateService } from '../src/services/installStateService';
 
+// Allow sequential 60-second fixture commands to finish before test cleanup.
+jest.setTimeout(240_000);
+
 async function unusedPort(): Promise<number> {
   const server = net.createServer();
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -22,6 +25,16 @@ beforeEach(async () => {
   fixture.env.FIXTURE_PORT = String(port);
 });
 afterEach(() => fixture?.cleanup());
+
+test('fixture commands distinguish installer exit codes from spawn failures', async () => {
+  expect(await fixture.run(process.execPath, ['-e', 'process.exit(7)'])).toMatchObject({ code: 7 });
+  await expect(fixture.run(path.join(fixture.root, 'missing-command'), [])).rejects.toMatchObject({ code: 'ENOENT' });
+});
+
+(process.platform === 'win32' ? test.skip : test)('fixture commands reject terminated processes', async () => {
+  await expect(fixture.run(process.execPath, ['-e', 'process.kill(process.pid, "SIGTERM")']))
+    .rejects.toMatchObject({ signal: 'SIGTERM' });
+});
 
 const posix = process.platform === 'win32' ? describe.skip : describe;
 posix.each(['macos', 'linux'] as const)('%s executable installer behavior', platform => {
