@@ -177,6 +177,14 @@ tool is unavailable.
   requests are native-session cumulative; subtract the saved checkpoint before
   recording a resumed turn. Keep this logic in `backends/copilotUsage.ts` and
   validate native text/stream/resume/usage with `npm run e2e:copilot`.
+- Copilot owns npm/native process trees through `copilotProcess.ts`; stop/reset/
+  shutdown must terminate descendants, not only the launcher. Child prose/tools
+  are excluded from root presentation, but child work still blocks replay and
+  contributes to native usage. Auto/unverified models fail media gates closed.
+  Registry/server/reset callers await cleanup promises before exit or reuse.
+  Live tracked children remain discovery roots after their launcher exits.
+  The owned group also survives leader exit. Permanent server shutdown blocks
+  late starts; reusable update shutdown blocks starts only during its drain.
 - Claude Code Interactive is a separate protocol/backend path requiring real CLI
   compatibility checks when protocol behavior changes.
 - Do not auto-update Claude Code CLI as part of Claude Code Interactive

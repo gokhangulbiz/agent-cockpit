@@ -5,6 +5,7 @@ import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import type { CliProfile, StreamEvent } from '../src/types';
 import { CopilotAdapter, __copilotTestUtils, resolveCopilotCliRuntime } from '../src/services/backends/copilot';
+import { checkOneShotMediaInput } from '../src/services/backends/mediaCapabilities';
 
 const {
   buildCopilotRunArgs,
@@ -56,13 +57,22 @@ describe('Copilot backend metadata', () => {
     expect(defaults).toHaveLength(1);
     expect(defaults[0].id).toBe('auto');
     for (const model of COPILOT_MODELS) {
-      expect(model.capabilities?.input?.pdf).toBe(true);
-      if (model.id === 'auto' || model.id.startsWith('claude-haiku')) {
+      expect(model.capabilities?.input?.pdf).toBe(model.id === 'gpt-6.1-sol');
+      if (model.id === 'auto' || model.id.startsWith('claude-haiku') || model.id.startsWith('gemini')) {
         expect(model.supportedEffortLevels).toBeUndefined();
       } else {
         expect(model.supportedEffortLevels).toEqual(['low', 'medium', 'high', 'xhigh']);
       }
     }
+  });
+
+  test.each(['image', 'pdf'] as const)('gates %s processors on verified explicit models rather than automatic routing', modality => {
+    const metadata = new CopilotAdapter().metadata;
+    expect(checkOneShotMediaInput(metadata, 'gpt-6.1-sol', modality).ok).toBe(true);
+    expect(checkOneShotMediaInput(metadata, undefined, modality).ok).toBe(false);
+    expect(checkOneShotMediaInput(metadata, 'auto', modality).ok).toBe(false);
+    expect(checkOneShotMediaInput(metadata, 'gemini-3.8-flash', modality).ok).toBe(false);
+    expect(checkOneShotMediaInput(metadata, 'claude-sonnet-5.5', modality).ok).toBe(false);
   });
 
   test('session resume is supported while active turn resume is not', () => {
@@ -135,7 +145,7 @@ describe('buildCopilotRunArgs', () => {
     expect(args).toEqual(expect.arrayContaining(['--available-tools', 'none']));
   });
 
-  test.each(['auto', 'claude-haiku-4.5', 'unknown-model'])('does not send reasoning effort for %s', model => {
+  test.each(['auto', 'claude-haiku-4.5', 'gemini-3.8-flash', 'unknown-model'])('does not send reasoning effort for %s', model => {
     expect(buildCopilotRunArgs('hi', { model, effort: 'high' })).not.toContain('--reasoning-effort');
   });
 
@@ -184,6 +194,21 @@ describe('copilotMcpConfig', () => {
 });
 
 describe('translateCopilotLine', () => {
+  test.each([
+    ['create', { path: '/repo/output.txt' }, 'Write', 'Writing'],
+    ['str_replace', { path: '/repo/source.ts' }, 'Edit', 'Editing'],
+    ['bash', { command: 'echo hello' }, 'Bash', 'Running:'],
+    ['grep', { pattern: 'marker' }, 'Grep', 'Searching for'],
+    ['glob', { pattern: '*.ts' }, 'Glob', 'Finding files'],
+    ['web_fetch', { url: 'https://example.test' }, 'WebFetch', 'Fetching:'],
+    ['web_search', { query: 'marker' }, 'WebSearch', 'Searching:'],
+  ])('presents %s tool activity with the correct action and input', (name, args, tool, description) => {
+    const [event] = translateCopilotLine(JSON.stringify({
+      type: 'tool.execution_start', data: { toolCallId: 'tool1', toolName: name, arguments: args },
+    }));
+    expect(event).toMatchObject({ type: 'tool_activity', id: 'tool1', tool, description: expect.stringContaining(description) });
+  });
+
   test('retains the tool name when native completion events omit it', () => {
     const names = new Map<string, string>();
     translateCopilotLine(JSON.stringify({
@@ -730,6 +755,138 @@ describe('Copilot lifecycle regressions', () => {
     expect(spawn).toHaveBeenCalledTimes(2);
     expect(events.filter(event => event.type === 'session_recovery')).toHaveLength(1);
     expect(events.filter(event => event.type === 'error')).toHaveLength(1);
+  });
+
+  test('keeps child prose, reasoning, and tool activity out of the parent stream', async () => {
+    const backend = adapter(proc => proc.finish([
+      { type: 'tool.execution_start', data: { toolCallId: 'task1', toolName: 'task' } },
+      { type: 'assistant.message_delta', agentId: 'child', data: { messageId: 'child1', deltaContent: 'CHILD' } },
+      { type: 'assistant.message', data: { parentToolCallId: 'task1', content: 'CHILD FINAL' } },
+      { type: 'assistant.reasoning_delta', agentId: 'child', data: { deltaContent: 'CHILD THINKING' } },
+      { type: 'tool.execution_start', agentId: 'child', data: { toolCallId: 'child-tool', toolName: 'bash' } },
+      { type: 'tool.execution_complete', agentId: 'child', data: { toolCallId: 'child-tool', success: true } },
+      { type: 'assistant.message', data: { messageId: 'parent1', content: '{"answer":"PARENT"}' } },
+      { type: 'result', exitCode: 0 },
+    ]));
+    const events = await collect(backend.sendMessage('test', options()).stream);
+    expect(events.filter(event => event.type === 'text')).toEqual([{ type: 'text', content: '{"answer":"PARENT"}', streaming: false }]);
+    expect(events.filter(event => event.type === 'thinking')).toHaveLength(0);
+    expect(events.filter(event => event.type === 'tool_activity')).toHaveLength(1);
+    expect(events.filter(event => event.type === 'tool_outcomes')).toHaveLength(0);
+  });
+
+  test('suppressed child tool work still prevents automatic prompt replay', async () => {
+    const backend = adapter(proc => proc.finish([
+      { type: 'tool.execution_start', agentId: 'child', data: { toolCallId: 'child-tool', toolName: 'bash' } },
+      { type: 'session.error', data: { message: 'Session not found' } },
+    ], 1));
+    const events = await collect(backend.sendMessage('test', {
+      ...options(), isNewSession: false, externalSessionId: 'old-session',
+    }).stream);
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(events.filter(event => event.type === 'session_recovery')).toHaveLength(0);
+  });
+
+  test('shutdown cancels unconsumed turns but leaves the adapter reusable', async () => {
+    const backend = adapter(proc => proc.finish([{ type: 'assistant.message', data: { content: 'new turn' } }]));
+    const old = backend.sendMessage('old', options());
+    await backend.shutdown();
+    expect(await collect(old.stream)).toEqual([
+      { type: 'error', error: 'Copilot turn aborted.', source: 'abort' }, { type: 'done' },
+    ]);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(await collect(backend.sendMessage('new', options()).stream)).toEqual(expect.arrayContaining([
+      { type: 'text', content: 'new turn', streaming: false },
+    ]));
+  });
+
+  test('shutdown cancels one-shots even when the launcher closes cleanly with partial text', async () => {
+    const backend = adapter(proc => {
+      proc.stdout.write(JSON.stringify({ type: 'assistant.message', data: { content: 'partial' } }) + '\n');
+      void backend.shutdown();
+    });
+    await expect(backend.runOneShot('test')).rejects.toThrow('aborted');
+    expect(processes[0].kill).toHaveBeenCalledWith('SIGTERM');
+  });
+
+  test('shutdown during summary generation preserves the supplied fallback', async () => {
+    const backend = adapter(proc => {
+      proc.stdout.write(JSON.stringify({ type: 'assistant.message', data: { content: 'partial' } }) + '\n');
+      void backend.shutdown();
+    });
+    await expect(backend.generateSummary([{ role: 'user', content: 'test' }], 'saved summary')).resolves.toBe('saved summary');
+  });
+
+  test('reports asynchronous spawn failures with the install diagnostic', async () => {
+    const backend = adapter(proc => {
+      proc.emit('error', Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' }));
+      proc.finish();
+    });
+    expect(await collect(backend.sendMessage('test', options()).stream)).toEqual(expect.arrayContaining([
+      { type: 'error', error: 'GitHub Copilot CLI is not installed or is not available on PATH.' }, { type: 'done' },
+    ]));
+  });
+
+  test('stream read failures stay terminal and clean up the child', async () => {
+    const backend = adapter(proc => { proc.stdout.destroy(new Error('pipe failed')); });
+    expect(await collect(backend.sendMessage('test', options()).stream)).toEqual(expect.arrayContaining([
+      { type: 'error', error: 'pipe failed' }, { type: 'done' },
+    ]));
+    expect(processes[0].kill).toHaveBeenCalledWith('SIGTERM');
+  });
+
+  test('missing-session recovery remains bounded when snapshot persistence fails', async () => {
+    const backend = adapter((proc, index) => {
+      if (index === 0) proc.finish([{ type: 'session.error', data: { message: 'Session not found' } }], 1);
+      else proc.finish([{ type: 'assistant.message', data: { content: 'recovered' } }]);
+    });
+    const events = await collect(backend.sendMessage('continue', {
+      ...options(), isNewSession: false, externalSessionId: 'old-session',
+      sessionRecovery: { createSnapshot: async () => { throw new Error('disk full'); } },
+    }).stream);
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(events.filter(event => event.type === 'session_recovery')).toHaveLength(1);
+    expect(events.filter(event => event.type === 'error')).toHaveLength(0);
+    expect(spawn.mock.calls[1][1][1]).toContain('prior context may be incomplete');
+  });
+
+  test('permanent shutdown rejects late starts without spawning', async () => {
+    const backend = adapter(proc => proc.finish());
+    await backend.shutdown({ permanent: true });
+    expect(await collect(backend.sendMessage('late', options()).stream)).toEqual([
+      { type: 'error', error: 'Copilot turn aborted.', source: 'abort' }, { type: 'done' },
+    ]);
+    await expect(backend.runOneShot('late')).rejects.toThrow('shutting down');
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  test('reusable shutdown blocks starts during its asynchronous drain', async () => {
+    const backend = adapter(() => {});
+    const first = backend.sendMessage('first', options());
+    await first.stream.next();
+    const scope = (backend as unknown as { scopes: Set<{ stop(): Promise<void> }> }).scopes.values().next().value!;
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const original = scope.stop.bind(scope);
+    jest.spyOn(scope, 'stop').mockImplementation(async () => { await pending; await original(); });
+    const drain = backend.shutdown();
+    const second = backend.sendMessage('second', options());
+    expect(await collect(second.stream)).toEqual([
+      { type: 'error', error: 'Copilot turn aborted.', source: 'abort' }, { type: 'done' },
+    ]);
+    await expect(backend.runOneShot('third')).rejects.toThrow('shutting down');
+    expect(spawn).toHaveBeenCalledTimes(1);
+    release();
+    await drain;
+    await first.stream.return(undefined);
+  });
+
+  test('spawn failure is reported without session recovery', async () => {
+    const backend = adapter(() => {});
+    spawn.mockImplementationOnce(() => { throw Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' }); });
+    expect(await collect(backend.sendMessage('test', options()).stream)).toEqual([
+      { type: 'error', error: 'GitHub Copilot CLI is not installed or is not available on PATH.' }, { type: 'done' },
+    ]);
   });
 
   test('subtracts the saved native usage baseline after an adapter restart', async () => {

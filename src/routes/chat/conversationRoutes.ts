@@ -462,7 +462,7 @@ export function createConversationRouter(opts: ConversationRoutesOptions): expre
       if (conv) {
         const runtime = await chatService.resolveCliProfileRuntime(conv.cliProfileId, conv.backend);
         const adapter = backendRegistry.get(runtime.backendId);
-        if (adapter) adapter.onSessionReset(convId);
+        if (adapter) await adapter.onSessionReset(convId);
       }
 
       // Revoke any Memory / KB Search MCP tokens issued for this conversation.

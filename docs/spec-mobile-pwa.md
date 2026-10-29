@@ -136,6 +136,11 @@ The PWA currently covers:
   mid-turn-input controls remain unavailable. Per-turn token/credit accounting
   is performed on the server, and `costSource:'none'` keeps mobile cost `n/a`.
   No Copilot-specific PWA assets, manifest, or service-worker changes are needed.
+  Gemini's unverified effort options are also hidden. Auto routing is not
+  eligible for media processors; explicit verified `gpt-6.1-sol` is required.
+  Delegated prose/activity cannot contaminate the root stream. Copilot-specific
+  mobile browser validation remains pending; shared metadata wiring is not a
+  claim of fully verified native mobile parity.
 - Active/archived conversation list via `GET /api/chat/conversations`.
 - Workspace-level archives are respected by the shared conversation-list contract: archived workspaces are excluded from the mobile active and archived conversation lists unless a caller explicitly asks for `includeArchivedWorkspaces`, which the PWA does not do. The PWA does not expose workspace archive management, remapping, file snapshot restore, or archived-data deletion; those remain desktop filesystem-management workflows.
 - Flat latest-first conversation list with a workspace select filter. `All conversations` is the default; choosing a workspace filters the list to that `workspaceId` without introducing collapsible workspace groups. Each card renders the workspace label in the header and keeps the timestamp in the footer beside message count/live status so the date appears only once.

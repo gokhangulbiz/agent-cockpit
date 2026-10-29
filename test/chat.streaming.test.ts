@@ -1708,6 +1708,7 @@ describe('sendMessage options passthrough', () => {
       return { stream: stream(), abort: () => {}, sendInput: () => {} };
     };
 
+    env.wsFns.clearBuffer(conv.id);
     const ws2 = await env.connectWs(conv.id);
     const eventsPromise2 = env.readWsEvents(ws2);
     await env.request('POST', `/api/chat/conversations/${conv.id}/message`, {

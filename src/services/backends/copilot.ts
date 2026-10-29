@@ -6,6 +6,7 @@ import path from 'path';
 import { BaseBackendAdapter, type BackendCallOptions, type RunOneShotAttachment, type RunOneShotOptions } from './base';
 import { extractToolOutcome, shortenPath } from './toolUtils';
 import { copilotTurnUsage, copilotUsageCheckpoint, readCopilotUsageBaseline } from './copilotUsage';
+import { CopilotProcessScope } from './copilotProcess';
 import {
   buildNativeSessionRecovery,
   buildSessionRecoveryEvent,
@@ -36,8 +37,8 @@ const COPILOT_EFFORT_ORDER: EffortLevel[] = ['low', 'medium', 'high', 'xhigh'];
 const COPILOT_EFFORT_SET = new Set<string>(COPILOT_EFFORT_ORDER);
 const copilotLog = logger.child({ module: 'copilot-backend' });
 
-const TEXT_IMAGE_MODEL_CAPABILITIES: ModelCapabilities = {
-  input: { text: true, image: true, pdf: true },
+const TEXT_MODEL_CAPABILITIES: ModelCapabilities = {
+  input: { text: true },
   output: { text: true },
   reasoning: true,
 };
@@ -49,6 +50,7 @@ interface CopilotModelSeed {
   description: string;
   default?: boolean;
   reasoning?: boolean;
+  mediaVerified?: boolean;
 }
 
 // Curated catalog. GitHub Copilot CLI has no machine-readable `models` listing,
@@ -66,7 +68,7 @@ const COPILOT_MODEL_SEEDS: CopilotModelSeed[] = [
   { id: 'claude-opus-5', family: 'claude', costTier: 'high', description: 'Claude Opus 5' },
   { id: 'claude-opus-4.8', family: 'claude', costTier: 'high', description: 'Claude Opus 4.8' },
   { id: 'claude-opus-4.8-fast', family: 'claude', costTier: 'high', description: 'Latency-optimized Claude Opus 4.8' },
-  { id: 'gpt-6.1-sol', family: 'gpt', costTier: 'high', description: 'OpenAI GPT-6.1 Sol' },
+  { id: 'gpt-6.1-sol', family: 'gpt', costTier: 'high', description: 'OpenAI GPT-6.1 Sol', mediaVerified: true },
   { id: 'gpt-6-sol', family: 'gpt', costTier: 'high', description: 'OpenAI GPT-6 Sol' },
   { id: 'gpt-6-luna', family: 'gpt', costTier: 'high', description: 'OpenAI GPT-6 Luna' },
   { id: 'gpt-6-astra', family: 'gpt', costTier: 'high', description: 'OpenAI GPT-6 Astra' },
@@ -78,6 +80,7 @@ const COPILOT_MODEL_SEEDS: CopilotModelSeed[] = [
   { id: 'gpt-5.3-codex', family: 'gpt', costTier: 'medium', description: 'OpenAI GPT-5.3 Codex coding model' },
   { id: 'gpt-5.4-mini', family: 'gpt', costTier: 'low', description: 'Fast, low-cost GPT-5.4 mini model' },
   { id: 'gpt-5-mini', family: 'gpt', costTier: 'low', description: 'Fast, low-cost GPT-5 mini model' },
+  { id: 'gemini-3.8-flash', family: 'gemini', costTier: 'low', description: 'Gemini Flash; account availability and media/effort support are not verified', reasoning: false },
 ];
 
 const COPILOT_MODELS: ModelOption[] = COPILOT_MODEL_SEEDS.map(seed => ({
@@ -88,7 +91,11 @@ const COPILOT_MODELS: ModelOption[] = COPILOT_MODEL_SEEDS.map(seed => ({
   costTier: seed.costTier,
   ...(seed.default ? { default: true } : {}),
   ...(seed.reasoning === false ? {} : { supportedEffortLevels: [...COPILOT_EFFORT_ORDER] }),
-  capabilities: { ...TEXT_IMAGE_MODEL_CAPABILITIES, reasoning: seed.reasoning !== false },
+  capabilities: {
+    ...TEXT_MODEL_CAPABILITIES,
+    input: { text: true, image: seed.mediaVerified === true, pdf: seed.mediaVerified === true },
+    reasoning: seed.reasoning !== false,
+  },
 }));
 
 export interface CopilotCliRuntime extends CliCommandResolution {
@@ -133,6 +140,7 @@ interface CopilotRunResult {
 
 interface StreamState {
   proc: ChildProcess | null;
+  scope?: CopilotProcessScope;
   aborted: boolean;
 }
 
@@ -147,6 +155,11 @@ interface CopilotLineInfo {
 }
 
 export class CopilotAdapter extends BaseBackendAdapter {
+  private turns = new Map<StreamState, string | undefined>();
+  private scopes = new Set<CopilotProcessScope>();
+  private closing: Promise<void> | null = null;
+  private closed = false;
+  private oneShots = new Set<AbortController>();
   constructor(options: { workingDir?: string } = {}) {
     super(options);
     this.workingDir = options.workingDir || path.resolve(os.homedir(), '.agent-cockpit', 'workspace');
@@ -184,18 +197,41 @@ export class CopilotAdapter extends BaseBackendAdapter {
   }
 
   sendMessage(message: string, options: SendMessageOptions): SendMessageResult {
-    const state: StreamState = { proc: null, aborted: false };
+    const state: StreamState = { proc: null, aborted: this.closed || this.closing !== null };
+    this.turns.set(state, options.conversationId);
     return {
       stream: this._streamMessage(message, options, state),
       abort: () => {
         state.aborted = true;
-        state.proc?.kill('SIGTERM');
+        void state.scope?.stop();
       },
       sendInput: () => {},
     };
   }
 
+  shutdown(options: { permanent?: boolean } = {}): Promise<void> {
+    if (options.permanent) this.closed = true;
+    if (this.closing) return this.closing;
+    for (const state of this.turns.keys()) state.aborted = true;
+    for (const controller of this.oneShots) controller.abort();
+    this.closing = Promise.all([...this.scopes].map(scope => scope.stop()))
+      .then(() => {})
+      .finally(() => { this.closing = null; });
+    return this.closing;
+  }
+
+  async onSessionReset(conversationId: string): Promise<void> {
+    const cleanup: Promise<void>[] = [];
+    for (const [state, id] of this.turns) {
+      if (id !== conversationId) continue;
+      state.aborted = true;
+      if (state.scope) cleanup.push(state.scope.stop());
+    }
+    await Promise.all(cleanup);
+  }
+
   async runOneShot(prompt: string, options: RunOneShotOptions = {}): Promise<string> {
+    if (this.closed || this.closing) throw new Error('Copilot is shutting down.');
     const workingDir = resolveCopilotWorkingDir(options.workingDir || this.workingDir || process.cwd());
     const runtime = resolveCopilotCliRuntime(options.cliProfile);
     const args = buildCopilotRunArgs(prompt, {
@@ -206,12 +242,22 @@ export class CopilotAdapter extends BaseBackendAdapter {
       mcpServers: options.mcpServers,
       attachments: options.attachments,
     });
-    const result = await runCopilotOnce(runtime, args, {
-      cwd: workingDir,
-      timeoutMs: options.timeoutMs ?? COPILOT_EXEC_TIMEOUT_MS,
-      abortSignal: options.abortSignal,
-    });
-    return result.text.trim();
+    const controller = new AbortController();
+    this.oneShots.add(controller);
+    try {
+      const result = await runCopilotOnce(runtime, args, {
+        cwd: workingDir,
+        timeoutMs: options.timeoutMs ?? COPILOT_EXEC_TIMEOUT_MS,
+        abortSignal: options.abortSignal ? AbortSignal.any([options.abortSignal, controller.signal]) : controller.signal,
+        registerScope: scope => {
+          this.scopes.add(scope);
+          return () => this.scopes.delete(scope);
+        },
+      });
+      return result.text.trim();
+    } finally {
+      this.oneShots.delete(controller);
+    }
   }
 
   async generateSummary(messages: { role: string; content: string }[], fallback: string, options?: BackendCallOptions): Promise<string> {
@@ -238,7 +284,11 @@ export class CopilotAdapter extends BaseBackendAdapter {
   }
 
   private async *_streamMessage(message: string, options: SendMessageOptions, state: StreamState): AsyncGenerator<StreamEvent> {
-    yield* this._streamMessageAttempt(message, options, state, false);
+    try {
+      yield* this._streamMessageAttempt(message, options, state, false);
+    } finally {
+      this.turns.delete(state);
+    }
   }
 
   private async *_streamMessageAttempt(
@@ -281,6 +331,8 @@ export class CopilotAdapter extends BaseBackendAdapter {
         cwd: workingDir,
         env: runtime.env,
         stdio: ['ignore', 'pipe', 'pipe'],
+        detached: process.platform !== 'win32',
+        windowsHide: true,
       });
       exitPromise = waitForExit(proc);
     } catch (err: unknown) {
@@ -289,11 +341,13 @@ export class CopilotAdapter extends BaseBackendAdapter {
       return;
     }
     state.proc = proc;
+    const scope = new CopilotProcessScope(proc);
+    state.scope = scope;
+    this.scopes.add(scope);
     proc.stdout?.setEncoding('utf8');
     proc.stderr?.setEncoding('utf8');
     const stderrChunks: string[] = [];
     proc.stderr?.on('data', chunk => stderrChunks.push(chunk.toString()));
-    let exited = false;
     try {
       yield { type: 'backend_runtime', processId: proc.pid ?? null };
 
@@ -311,6 +365,8 @@ export class CopilotAdapter extends BaseBackendAdapter {
 
       const handleLine = function* (this: CopilotAdapter, line: string): Generator<StreamEvent> {
         const info = copilotLineInfo(line);
+        const parsed = safeParse(line);
+        if (parsed?.type === 'tool.execution_start') hasTurnOutput = true;
         outputTokens += info.outputTokens;
         premiumRequests += info.premiumRequests;
         if (info.checkpointUsage) checkpointUsage = info.checkpointUsage;
@@ -371,8 +427,8 @@ export class CopilotAdapter extends BaseBackendAdapter {
       }
 
       const exit = await exitPromise;
-      exited = true;
       if (state.aborted) {
+        await scope.stop();
         yield { type: 'error', error: 'Copilot turn aborted.', source: 'abort' };
         yield { type: 'done' };
         return;
@@ -438,7 +494,9 @@ export class CopilotAdapter extends BaseBackendAdapter {
       }
       yield { type: 'done' };
     } finally {
-      if (!exited && !state.aborted) proc.kill('SIGTERM');
+      await scope.stop();
+      this.scopes.delete(scope);
+      if (state.scope === scope) state.scope = undefined;
       if (state.proc === proc) state.proc = null;
     }
   }
@@ -536,6 +594,7 @@ async function runCopilotOnce(runtime: CopilotCliRuntime, args: string[], option
   cwd?: string | null;
   timeoutMs: number;
   abortSignal?: AbortSignal;
+  registerScope?: (scope: CopilotProcessScope) => () => void;
 }): Promise<CopilotRunResult> {
   if (options.abortSignal?.aborted) throw new Error('Copilot command aborted');
   const invocation = buildCliCommandInvocation(runtime, args);
@@ -544,7 +603,11 @@ async function runCopilotOnce(runtime: CopilotCliRuntime, args: string[], option
       cwd: options.cwd || undefined,
       env: runtime.env,
       stdio: ['ignore', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32',
+      windowsHide: true,
     });
+    const scope = new CopilotProcessScope(proc);
+    const unregister = options.registerScope?.(scope);
     proc.stdout?.setEncoding('utf8');
     proc.stderr?.setEncoding('utf8');
     let stdout = '';
@@ -558,21 +621,19 @@ async function runCopilotOnce(runtime: CopilotCliRuntime, args: string[], option
       if (settled) return;
       settled = true;
       cleanup();
-      reject(err);
+      void scope.stop().finally(() => { unregister?.(); reject(err); });
     };
     const succeed = (result: CopilotRunResult) => {
       if (settled) return;
       settled = true;
       cleanup();
-      resolve(result);
+      void scope.stop().finally(() => { unregister?.(); resolve(result); });
     };
     const timeout = setTimeout(() => {
       fail(new Error('Copilot command timed out'));
-      proc.kill('SIGTERM');
     }, options.timeoutMs);
     const onAbort = () => {
       fail(new Error('Copilot command aborted'));
-      proc.kill('SIGTERM');
     };
     options.abortSignal?.addEventListener('abort', onAbort, { once: true });
     proc.stdout?.on('data', chunk => { stdout += chunk.toString(); });
@@ -614,6 +675,7 @@ function collectCopilotJson(stdout: string): CopilotRunResult {
 
     const parsed = safeParse(line);
     if (!parsed) continue;
+    if (copilotChildEvent(parsed)) continue;
     if (parsed.type === 'tool.execution_start') {
       deltaTextByMessageId.clear();
       finalTextByMessageId.clear();
@@ -651,6 +713,7 @@ function collectCopilotJson(stdout: string): CopilotRunResult {
 function translateCopilotLine(line: string, toolNames?: Map<string, string>): StreamEvent[] {
   const parsed = safeParse(line);
   if (!parsed) return [];
+  if (copilotChildEvent(parsed)) return [];
   const type = parsed.type;
   const data = isRecord(parsed.data) ? parsed.data : null;
   const events: StreamEvent[] = [];
@@ -853,10 +916,15 @@ function copilotLineInfo(line: string): CopilotLineInfo {
 
 function copilotFinalMessageText(line: string): { messageId: string; text: string } | null {
   const parsed = safeParse(line);
-  if (!parsed || parsed.type !== 'assistant.message' || !isRecord(parsed.data)) return null;
+  if (!parsed || copilotChildEvent(parsed) || parsed.type !== 'assistant.message' || !isRecord(parsed.data)) return null;
   const content = typeof parsed.data.content === 'string' ? parsed.data.content.trim() : '';
   if (!content) return null;
   return { messageId: stringOrNull(parsed.data.messageId) || 'default', text: content };
+}
+
+function copilotChildEvent(event: Record<string, unknown>): boolean {
+  const data = isRecord(event.data) ? event.data : {};
+  return Boolean(stringOrNull(event.agentId) || stringOrNull(data.parentToolCallId));
 }
 
 // ── Shared helpers ──────────────────────────────────────────────────────────

@@ -1,10 +1,10 @@
 ---
 id: 0094
 title: Validate Copilot JSONL contracts against the native CLI
-status: Accepted
+status: Superseded
 date: 2026-10-26
 supersedes: [0093]
-superseded-by: null
+superseded-by: 0095
 tags: [backends, copilot, usage, testing]
 affects:
   - src/services/backends/copilot.ts

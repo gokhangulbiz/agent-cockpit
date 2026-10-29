@@ -142,7 +142,7 @@ export class CliUpdateService {
     opts: {
       loadSettings?: () => Promise<Settings>;
       hasActiveStreams?: () => boolean;
-      onUpdated?: () => void;
+      onUpdated?: () => void | Promise<void>;
     } = {},
   ): Promise<CliUpdateResult> {
     const loadSettings = opts.loadSettings || this._loadSettings || this._requireSettingsLoader();
@@ -186,7 +186,7 @@ export class CliUpdateService {
 
       const wrapperStep = this._repairWindowsCliToolWrapper(target, current);
       if (wrapperStep) steps.push(wrapperStep);
-      opts.onUpdated?.();
+      await opts.onUpdated?.();
       const refreshed = await this._probeTarget(target);
       this._items.set(itemId, refreshed);
       this._lastCheckAt = new Date().toISOString();
@@ -560,19 +560,30 @@ function isSubpath(child: string, parent: string): boolean {
 }
 
 export function parseVersion(output: string | null | undefined): string | null {
-  const match = String(output || '').match(/\b(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b/);
+  const match = String(output || '').match(/\b(\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)\b/);
   return match ? match[1] : null;
 }
 
 export function isNewerVersion(remote: string | null, local: string | null): boolean {
   if (!remote || !local) return false;
-  const r = remote.split(/[-+]/)[0].split('.').map(Number);
-  const l = local.split(/[-+]/)[0].split('.').map(Number);
-  for (let i = 0; i < Math.max(r.length, l.length); i += 1) {
-    const rv = r[i] || 0;
-    const lv = l[i] || 0;
-    if (rv > lv) return true;
-    if (rv < lv) return false;
+  const pattern = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+  const r = remote.match(pattern);
+  const l = local.match(pattern);
+  if (!r || !l) return false;
+  for (let i = 1; i <= 3; i += 1) {
+    if (BigInt(r[i]) !== BigInt(l[i])) return BigInt(r[i]) > BigInt(l[i]);
+  }
+  if (!r[4] || !l[4]) return !r[4] && Boolean(l[4]);
+  const rp = r[4].split('.');
+  const lp = l[4].split('.');
+  for (let i = 0; i < Math.max(rp.length, lp.length); i += 1) {
+    if (rp[i] === undefined || lp[i] === undefined) return lp[i] === undefined;
+    if (rp[i] === lp[i]) continue;
+    const rn = /^\d+$/.test(rp[i]);
+    const ln = /^\d+$/.test(lp[i]);
+    if (rn && ln) return BigInt(rp[i]) > BigInt(lp[i]);
+    if (rn !== ln) return !rn;
+    return rp[i] > lp[i];
   }
   return false;
 }

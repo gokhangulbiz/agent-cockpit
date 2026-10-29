@@ -61,7 +61,7 @@ export function createWorktreeIsolationRouter(
       await opts.enqueueWorkspaceContextFinalizer(workspaceId, target.convId, target.sessionNumber, 'session_reset');
 
       const adapter = target.runtime ? opts.backendRegistry.get(target.runtime.backendId) : null;
-      if (adapter) adapter.onSessionReset(target.convId);
+      if (adapter) await adapter.onSessionReset(target.convId);
 
       opts.memoryMcp.revokeMemoryMcpSession(target.convId);
       opts.kbSearchMcp.revokeKbSearchSession(target.convId);

@@ -89,8 +89,7 @@ Native compatibility is verified on Grok Build 1.0.52, macOS arm64. See the
 - self-configured authentication that reuses the `copilot` CLI login under
   `~/.copilot` (sign in with `copilot` then `/login`); Agent Cockpit checks
   availability with `copilot --version` but does not manage the login;
-- curated model catalog (Claude and GPT model identifiers) selectable per
-  conversation, since the CLI exposes no machine-readable model listing;
+- static curated Claude/GPT/Gemini catalog, not live account-specific discovery;
 - default `auto` routing plus explicit account-dependent model selections;
 - reasoning effort through `copilot --reasoning-effort <low|medium|high|xhigh>`
   for explicit reasoning models, not automatic routing or Haiku;
@@ -100,7 +99,9 @@ Native compatibility is verified on Grok Build 1.0.52, macOS arm64. See the
   `tool.execution_complete` events;
 - session continuity through persisted Copilot session IDs passed back with
   `copilot --resume <sessionId>`;
-- one-shot image/PDF attachments through `copilot --attachment <path>`;
+- one-shot image/PDF attachments through `copilot --attachment <path>` with
+  explicitly verified `gpt-6.1-sol`; auto and unverified models are not eligible
+  for media processors;
 - Memory and Knowledge Base MCP injection through
   `copilot --additional-mcp-config <json>`;
 - per-turn input/output/cache tokens and premium-request credits, derived by
@@ -108,11 +109,18 @@ Native compatibility is verified on Grok Build 1.0.52, macOS arm64. See the
   resumed-session totals; no per-turn USD cost or estimate;
 - restricted text-only one-shots explicitly expose zero tools using
   `--available-tools none`;
-- no plan mode, subagents, mid-turn input, or interactive user questions through
-  Agent Cockpit today;
+- native delegation output isolated from the root answer; grouped child UI,
+  plan/goal controls, mid-turn input, and interactive questions are deferred
+  integrations, not missing native CLI capabilities;
 - no confirmed native durable-memory directory for Agent Cockpit to import or
   watch. Copilot memory integration uses Agent Cockpit's Memory MCP tools.
 
 Native image/PDF/MCP/text/stream/resume/usage compatibility is verified with Copilot
-CLI 1.0.103-0 on macOS arm64 through `npm run e2e:copilot`. Windows package resolution
+CLI 1.0.103-0 and 1.0.105 on macOS arm64 through `npm run e2e:copilot`. Windows package resolution
 has unit coverage; native Windows/Linux compatibility is not claimed.
+The fixture MCP check is not full Memory governance/KB workflow verification.
+Workspace Context, Routines, file delivery, and desktop/mobile harness flows are
+wired but still need comprehensive Copilot-specific end-to-end evidence.
+Named profiles share terminal authentication and do not isolate accounts.
+Anthropic `max` effort is not advertised until selection-specific verification.
+Native installations have a manual updater but no background update discovery.

@@ -112,11 +112,11 @@ restart/import retry loop.
 ### Graceful Shutdown
 
 Signal handlers for `SIGTERM`/`SIGINT`:
-1. Call and await `chatShutdown()` — marks pending/runtime-attached durable stream jobs `finalizing` with `Interrupted by server shutdown`, aborts runtime backend handles, and clears process-local stream maps without deleting those durable jobs
-2. Call `backendRegistry.shutdownAll()` — kills long-lived backend processes (e.g. Kiro ACP)
-3. Call `wsShutdown()` — closes all WebSocket connections and the WS server
-4. Call `server.close()` — stop accepting connections
-5. 10-second forced exit timeout (`.unref()` as safety net)
+1. Set the shutdown admission flag. Requests that reach Express afterward receive `503 { error: "Server is shutting down." }`. Begin `server.close()` immediately to stop accepting new connections.
+2. Call and await `chatShutdown()` — mark pending/runtime-attached durable stream jobs `finalizing` with `Interrupted by server shutdown`, abort backend handles, stop schedulers, and clear process-local stream maps without deleting durable jobs.
+3. Await `backendRegistry.shutdownAll({ permanent:true })`. Synchronous adapters remain supported; asynchronous cleanup is awaited even when another adapter fails. Copilot permanently rejects late chat/one-shot starts, including requests that had passed HTTP admission before shutdown.
+4. Close WebSocket connections/server, await HTTP closure, clear the forced-exit timer, and only then exit successfully.
+5. A 10-second forced exit timeout (`.unref()`) remains the safety net. Normal CLI updates use reusable `shutdownAll()` instead of permanent shutdown; Copilot blocks starts during that drain and permits them after completion.
 
 On the next process start, normal durable job reconciliation converts those finalizing shutdown jobs into one persisted assistant `streamError` when the accepted user message exists.
 

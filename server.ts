@@ -44,6 +44,14 @@ if (pendingImport.applied) {
 }
 
 const app = express();
+let shuttingDown = false;
+app.use((_req: Request, res: Response, next: NextFunction) => {
+  if (shuttingDown) {
+    res.status(503).json({ error: 'Server is shutting down.' });
+    return;
+  }
+  next();
+});
 
 app.set('trust proxy', 1);
 
@@ -292,7 +300,6 @@ chatService.initialize().then(async () => {
   });
   setWsFunctions(wsFns);
 
-  let shuttingDown = false;
   async function shutdown(signal: string) {
     if (shuttingDown) return;
     shuttingDown = true;
@@ -303,16 +310,19 @@ chatService.initialize().then(async () => {
       process.exit(1);
     }, 10000);
     forceExitTimer.unref();
+    const httpClosed = new Promise<void>(resolve => {
+      server.close(() => {
+        console.log('[shutdown] HTTP server closed');
+        resolve();
+      });
+    });
 
     await chatShutdown();
-    backendRegistry.shutdownAll();
+    await backendRegistry.shutdownAll({ permanent: true });
     wsFns.shutdown();
-
-    server.close(() => {
-      console.log('[shutdown] HTTP server closed');
-      clearTimeout(forceExitTimer);
-      process.exit(0);
-    });
+    await httpClosed;
+    clearTimeout(forceExitTimer);
+    process.exit(0);
   }
 
   process.on('SIGTERM', () => { void shutdown('SIGTERM'); });

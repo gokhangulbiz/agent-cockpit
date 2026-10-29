@@ -2,6 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { createCanvas } from '@napi-rs/canvas';
+import { execFileSync } from 'child_process';
 import { CopilotAdapter } from '../src/services/backends/copilot';
 import { readCopilotUsageBaseline } from '../src/services/backends/copilotUsage';
 import type { StreamEvent } from '../src/types';
@@ -10,7 +11,15 @@ const native = process.env.COPILOT_E2E === '1' ? describe : describe.skip;
 
 native('real Copilot CLI compatibility', () => {
   let workdir: string;
-  beforeAll(() => { workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'copilot-native-e2e-')); });
+  beforeAll(() => {
+    workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'copilot-native-e2e-'));
+    console.info('Copilot compatibility evidence', {
+      cli: execFileSync('copilot', ['--no-auto-update', '--version'], { encoding: 'utf8' }).split('\n')[0],
+      platform: process.platform, arch: process.arch,
+      revision: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+      dirty: execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim().length > 0,
+    });
+  });
   afterAll(() => { fs.rmSync(workdir, { recursive: true, force: true }); });
 
   test('transports explicit image and PDF attachments without file tools', async () => {
@@ -22,7 +31,7 @@ native('real Copilot CLI compatibility', () => {
     fs.writeFileSync(image, canvas.toBuffer('image/png'));
     const adapter = new CopilotAdapter({ workingDir: workdir });
     const text = await adapter.runOneShot('What is the dominant color of the attached image? Reply with one word. Do not use tools.', {
-      attachments: [{ path: image, kind: 'image' }], timeoutMs: 60_000,
+      attachments: [{ path: image, kind: 'image' }], timeoutMs: 60_000, model: 'gpt-6.1-sol',
     });
     expect(text.toLowerCase()).toContain('red');
 
@@ -45,7 +54,7 @@ native('real Copilot CLI compatibility', () => {
     const document = path.join(workdir, 'marker.pdf');
     fs.writeFileSync(document, pdf);
     expect(await adapter.runOneShot('Read the single marker in the attached PDF. Reply with only that marker. Do not use tools.', {
-      attachments: [{ path: document, kind: 'pdf' }], timeoutMs: 60_000,
+      attachments: [{ path: document, kind: 'pdf' }], timeoutMs: 60_000, model: 'gpt-6.1-sol',
     })).toContain('COPILOT_PDF_7315');
   }, 135_000);
 

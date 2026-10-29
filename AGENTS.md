@@ -118,6 +118,21 @@ one-shots on `--available-tools none` (an empty value exposes tools), preserve
 UTF-8 stream decoding, and subtract the saved native usage checkpoint before
 charging resumed-session totals. Keep usage parsing under
 `src/services/backends/copilotUsage.ts`. See ADR-0094.
+Keep process-tree containment in `copilotProcess.ts`, test real npm launcher
+topologies in `test/copilotProcess.test.ts`, and preserve root/child ownership
+in both streaming and one-shot responses. Hidden child tools must still block
+prompt replay; usage remains session-wide. Auto/unverified media must fail
+closed. See ADR-0095 for the smaller initial scope and evidence boundaries.
+Adapter shutdown/reset may return promises. Await `BackendRegistry.shutdownAll()`
+before server exit or post-update reuse, and await reset cleanup before replacing
+a native session. Keep descendant discovery rooted in every live tracked
+PID/start identity, including after its launcher exits.
+Preserve the owned detached group after leader exit to catch between-scan
+children. Server exit uses permanent shutdown and blocks request admission;
+CLI updates use reusable shutdown, which blocks starts only while draining.
+Retain verified child-led groups after leader exit as well, and cancel one-shot
+controllers before termination so a clean launcher close cannot accept partial
+output as success.
 
 # Grok Build Protocol Compatibility
 

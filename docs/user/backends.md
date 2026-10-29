@@ -134,6 +134,9 @@ with your GitHub account. Agent Cockpit reuses that CLI login from `~/.copilot`;
 it checks availability with `copilot --version` but does not manage the login
 itself. Use the **Check GitHub Copilot** button on the profile to confirm the
 CLI is available.
+This does not check credentials, subscription entitlement, account identity, or
+model permissions. Multiple named profiles still share the same terminal login;
+they are not independent accounts.
 
 Agent Cockpit talks to GitHub Copilot through non-interactive runs
 (`copilot -p <prompt> --output-format json`), streams visible thinking and tool
@@ -142,22 +145,30 @@ exposes no machine-readable model listing, Agent Cockpit ships a curated catalog
 of Copilot's Claude and GPT model identifiers. The default **auto** choice lets
 Copilot select an available model; explicit choices depend on your subscription
 and administrator policy. Reasoning effort is available for explicit reasoning
-models, not auto or Haiku.
+models, not auto, Haiku, or the unverified Gemini catalog entry. The catalog is
+static, not a live list of models available to your account.
 
 GitHub Copilot reports per-turn input/output/cache tokens and premium-request
 credits rather than USD cost. Resumed-session totals are subtracted so earlier
 turns are not counted again. If the native usage baseline cannot be read,
-uncertain cumulative charges are omitted. GitHub Copilot does not
-currently support subagents, goal mode, plan mode, mid-turn user input, or
-interactive user questions through Agent Cockpit.
+uncertain cumulative charges are omitted. Copilot has native delegation,
+questions, plan mode, and goal/autopilot features, but grouped child
+presentation and interactive controls are deferred in Agent Cockpit's initial
+integration. Child responses are kept separate from the parent answer.
 
 Image and PDF one-shot workflows, including attachment OCR and Knowledge Base
 image conversion, are sent through `copilot --attachment` with a multimodal
-model selected.
+explicitly verified `gpt-6.1-sol` selected. Auto routing and other unverified
+models are excluded from media-dependent processor choices; this conservative
+gate does not mean those models lack native media capabilities.
 
 Text-only one-shot jobs, such as title generation, run with no tools exposed.
 CLI updates stay under Agent Cockpit's update controls rather than being
 downloaded implicitly during a chat turn.
+Non-npm installations offer **Run updater**, but do not receive background
+update-available notifications. The native suite covers direct adapter
+transport; full Memory/KB/Context/Routine workflows and desktop/mobile browser
+parity still need end-to-end verification with Copilot.
 
 ## Backend Switching
 

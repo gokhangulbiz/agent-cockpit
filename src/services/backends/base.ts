@@ -162,7 +162,7 @@ export class BaseBackendAdapter {
    * Called during server shutdown.  Subclasses that spawn long-lived
    * processes should override this to kill them.
    */
-  shutdown(): void {
+  shutdown(_options?: { permanent?: boolean }): void | Promise<void> {
     // no-op by default
   }
 
@@ -171,7 +171,7 @@ export class BaseBackendAdapter {
    * that cache per-conversation state (e.g. process handles, session
    * mappings) should override this to clean up.
    */
-  onSessionReset(_conversationId: string): void {
+  onSessionReset(_conversationId: string): void | Promise<void> {
     // no-op by default
   }
 
