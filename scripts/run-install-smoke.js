@@ -7,6 +7,29 @@ const path = require('node:path');
 const net = require('node:net');
 const { spawnSync } = require('node:child_process');
 
+function runCommand(command, argv, options, outputRoot) {
+  const directory = fs.mkdtempSync(path.join(outputRoot, 'command-'));
+  const stdoutPath = path.join(directory, 'stdout.log');
+  const stderrPath = path.join(directory, 'stderr.log');
+  const stdoutFd = fs.openSync(stdoutPath, 'w', 0o600);
+  let stderrFd;
+  let result;
+  try {
+    stderrFd = fs.openSync(stderrPath, 'w', 0o600);
+    // Detached descendants can keep pipes open after the command has exited.
+    result = spawnSync(command, argv, { ...options, stdio: ['ignore', stdoutFd, stderrFd] });
+  } finally {
+    fs.closeSync(stdoutFd);
+    if (stderrFd !== undefined) fs.closeSync(stderrFd);
+  }
+  const stdout = fs.readFileSync(stdoutPath, 'utf8');
+  const stderr = fs.readFileSync(stderrPath, 'utf8');
+  if (result.error || result.status !== 0) {
+    throw new Error(`${path.basename(command)} failed (${result.status}): ${[result.error?.message, stderr || stdout].filter(Boolean).join('\n')}`);
+  }
+  return stdout;
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const value = (flag) => {
@@ -18,8 +41,8 @@ async function main() {
   if (autoStart && process.env.CI !== 'true') throw new Error('--auto-start is restricted to disposable CI runners.');
   const platform = process.platform;
   if (!['darwin', 'linux', 'win32'].includes(platform)) throw new Error(`Unsupported smoke platform: ${platform}`);
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(platform === 'darwin' ? '/tmp' : os.tmpdir(), 'Cockpit Install ')));
-  const installDir = path.join(root, 'installation');
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(platform === 'darwin' ? '/tmp' : os.tmpdir(), 'cockpit-install-')));
+  const installDir = path.join(root, 'installation with spaces');
   const home = path.join(root, 'home');
   const reportDir = path.resolve(value('--report-dir') || path.join(os.tmpdir(), `cockpit-install-report-${Date.now()}`));
   const releaseDir = path.resolve(value('--release-dir') || path.join(root, 'release'));
@@ -40,13 +63,7 @@ async function main() {
   const report = { platform, arch: process.arch, runtime: privateNode ? 'private' : 'system', checks: [], success: false };
   let state;
   const ps = 'powershell.exe';
-  const run = (command, argv, options = {}) => {
-    const result = spawnSync(command, argv, { env, encoding: 'utf8', timeout: 15 * 60_000, maxBuffer: 8 * 1024 * 1024, ...options });
-    if (result.error || result.status !== 0) {
-      throw new Error(`${path.basename(command)} failed (${result.status}): ${result.error?.message || result.stderr || result.stdout}`);
-    }
-    return result.stdout;
-  };
+  const run = (command, argv, options = {}) => runCommand(command, argv, { env, timeout: 15 * 60_000, ...options }, root);
   const readState = () => JSON.parse(fs.readFileSync(path.join(installDir, 'data', 'install.json'), 'utf8'));
   const readEnv = () => fs.readFileSync(path.join(readState().appDir, '.env'), 'utf8');
   const managedPid = () => {
@@ -224,4 +241,5 @@ async function main() {
   assert.ok(report.success, report.cleanupError || 'Installation smoke failed.');
 }
 
-main().catch(error => { console.error(error.message); process.exitCode = 1; });
+module.exports = { runCommand };
+if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });

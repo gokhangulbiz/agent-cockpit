@@ -317,6 +317,11 @@ stop helpers. The helpers export it before PM2 runs, so launchd and user systemd
 do not depend on inheriting the interactive installer's environment. Windows
 continues to use `<install-root>\pm2`.
 
+macOS writes and validates the LaunchAgent before starting PM2, but loads its
+`RunAtLoad` job only after the runtime start succeeds. This prevents the
+installer and login helper from racing to bootstrap the same empty PM2 home.
+Both production and dev then perform the version/setup readiness checks.
+
 Windows configuration preparation compares canonical source and destination
 `.env` paths before copying. A dev-directory alias that resolves to the same
 file is not copied onto itself; distinct app directories still receive the

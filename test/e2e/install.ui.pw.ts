@@ -6,6 +6,11 @@ const repaired = process.env.INSTALL_UI_REPAIRED === '1';
 const email = 'install-fixture@example.test';
 const password = 'install-fixture-password-42';
 
+test.beforeEach(async ({ page }) => {
+  // Optional font/style CDNs must not block local setup verification.
+  await page.route('https://**', route => route.abort());
+});
+
 test('fresh production installation completes owner setup and welcome without backend login', async ({ page, request }) => {
   test.skip(repaired, 'Owner setup already completed before repair.');
   await page.goto('/auth/setup');

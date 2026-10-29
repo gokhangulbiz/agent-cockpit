@@ -229,6 +229,23 @@ ensure_node
   });
 
   if (platform === 'macos') {
+    test('activates RunAtLoad startup only after the runtime has started', async () => {
+      const result = await runPosix(fixture, platform, `
+prepare_install
+capture_existing_install
+AUTO_START=true
+start_pm2() { touch "$FIXTURE_ROOT/runtime-started"; }
+activate_login_startup() {
+  [[ -f "$FIXTURE_ROOT/runtime-started" ]] || fail 'Runtime not started'
+  touch "$FIXTURE_ROOT/startup-activated"
+}
+wait_for_server() { :; }
+install_production
+`);
+      expect(result).toMatchObject({ code: 0 });
+      expect(fs.existsSync(path.join(fixture.root, 'startup-activated'))).toBe(true);
+    });
+
     test('keeps a ready installation when the optional browser cannot open', async () => {
       const result = await runPosix(fixture, platform, 'OPEN_BROWSER=true\nopen() { return 1; }\nopen_setup');
       expect(result).toMatchObject({ code: 0 });

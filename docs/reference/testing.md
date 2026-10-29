@@ -47,6 +47,12 @@ the official site. `--ui` runs owner/welcome and post-repair mobile Playwright
 checks with synthetic credentials. No authenticated backend account is needed.
 Install Playwright's browser dependencies first when unavailable.
 
+The temporary home/cache root has no added spaces while the installation path
+still contains spaces. This keeps node-gyp's header cache usable on Linux without
+dropping install-path coverage. Commands capture stdout/stderr through private
+regular files rather than pipes, so detached PM2/terminal descendants cannot
+keep a completed installer command waiting for EOF.
+
 The runner verifies the app's PID, cwd, port, and `PM2_HOME` in its isolated
 daemon, requires a new PID after repair, and also repairs an intentionally
 corrupt manifest while checking preserved config/secrets/data. Stopping must

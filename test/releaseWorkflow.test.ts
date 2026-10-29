@@ -37,4 +37,12 @@ describe('production installer release gates', () => {
     expect(source).toContain('uses: ./.github/workflows/install-smoke.yml');
     expect(source).not.toContain('full_matrix: true');
   });
+
+  test('ADR checks fetch fork commits and do not push with a fork token', () => {
+    const source = read('adr.yml');
+    expect(source).toContain('ref: ${{ github.event.pull_request.head.sha }}');
+    expect(source).toContain('CAN_PUSH_INDEX: ${{ github.event.pull_request.head.repo.full_name == github.repository }}');
+    expect(source).toContain('if [[ "$CAN_PUSH_INDEX" == true &&');
+    expect(source).not.toContain('ref: ${{ github.head_ref }}');
+  });
 });

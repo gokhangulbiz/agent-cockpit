@@ -660,6 +660,12 @@ PLIST
 
   launchctl unload "$plist_path" >/dev/null 2>&1 || true
   log "Registering macOS LaunchAgent ${LAUNCH_AGENT_LABEL}."
+}
+
+activate_login_startup() {
+  if [[ "$AUTO_START" != "true" ]]; then return; fi
+  local plist_path="${HOME}/Library/LaunchAgents/${LAUNCH_AGENT_LABEL}.plist"
+  if ! startup_is_owned "$plist_path"; then fail "Cannot activate a startup entry owned by another installation."; fi
   if ! launchctl load -w "$plist_path"; then
     fail "Failed to register macOS LaunchAgent at ${plist_path}."
   fi
@@ -951,6 +957,7 @@ install_production() {
   write_helper_scripts "$current_link" "$NODE_RUNTIME_PATH"
   register_login_startup
   start_pm2 "$current_link"
+  activate_login_startup
   wait_for_server "$current_link" "$release_version"
 
   log "Stage 4/4: release ${release_version} is ready."
@@ -991,6 +998,7 @@ install_dev() {
   write_helper_scripts "$DEV_DIR" "$NODE_RUNTIME_PATH"
   register_login_startup
   start_pm2 "$DEV_DIR"
+  activate_login_startup
   wait_for_server "$DEV_DIR"
 
   printf '[agent-cockpit] First-run setup token: %s\n' "$setup_token"
